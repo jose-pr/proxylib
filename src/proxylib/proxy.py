@@ -55,6 +55,21 @@ class _URI(NamedTuple):
                 getservbyname(self.scheme),
             )
 
+    def as_uri(self):
+        authority = self.netloc
+        userinfo = ""
+        if self.username:
+            userinfo = self.username
+            if self.password:
+                userinfo = userinfo + ":" + self.password
+
+        if userinfo:
+            authority = userinfo + "@" + self.netloc
+        if self.scheme:
+            return self.scheme + "://" + authority
+        else:
+            return "//" + authority
+
     @classmethod
     def from_str(
         cls,

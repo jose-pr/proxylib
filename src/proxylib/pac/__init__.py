@@ -10,7 +10,8 @@ from typing import overload as _overload
 from urllib.request import urlopen as _urlopen
 from warnings import warn as _warn
 
-from ..proxy import Proxy, ProxyMap, UriSplit
+from ..netutils import get_ip
+from ..proxy import Proxy, UriSplit
 
 _WEEKDAY = _Literal["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 _WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
@@ -23,10 +24,9 @@ class PAC(object):
     #### UTILITY FUNCTIONS ####
     @staticmethod
     def dnsResolve(host: str, /):
-        try:
-            return _socket.gethostbyname(host)
-        except:
-            return
+        ip = get_ip(host)
+        if ip:
+            return ip.exploded
 
     @staticmethod
     def myIpAddress():

@@ -14,7 +14,7 @@ class SimpleProxyMap(ProxyMap):
             proxy if isinstance(proxy, Sequence) else (proxy,)
         )
 
-    def __getitem__(self):
+    def __getitem__(self, uri: str):
         return self.proxies
 
 
