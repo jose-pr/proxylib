@@ -4,3 +4,5 @@ from .pac import PAC as PAC
 from .pac import JSProxyAutoConfig as JSProxyAutoConfig
 from .pac import load as load_pac
 from .proxy import *
+from .requests import RequestsProxies
+from .utils import SimpleProxyMap

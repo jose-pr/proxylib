@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxylib"
-version = "0.0.1"
+version = "0.5.5"
 authors = [{ name = "Jose A" }]
 description = "Proxy models and functions to build proxy configurations or get the systems proxy information and parse their result"
 readme = "README.md"
@@ -16,8 +16,8 @@ classifiers = [
 ]
 dependencies = []
 [project.optional-dependencies]
-dev = ['build', 'twine', 'hatchling', 'pytest']
-pac = ['dukpy']
+dev = ['build', 'twine', 'hatchling', 'pytest', 'requests']
+jspac = ['dukpy']
 ifaddr = ['ifaddr']
 
 [project.urls]

@@ -35,6 +35,8 @@ class EnvProxyConfig(ProxyMap):
         ip = get_ip(uri.host)
         for _no in self.no_proxy:
             if _no is None:
+                if ip.is_loopback():
+                    return [None]
                 for _if in get_local_interfaces():
                     if ip in _if.network:
                         return [None]
