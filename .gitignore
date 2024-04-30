@@ -1,4 +1,6 @@
 __pycache__
+/.git
+/.pytest*
 /_*
 [a-zA-Z]*__
 [a-zA-Z]*__.*
