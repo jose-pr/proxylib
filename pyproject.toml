@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = ""
+version = "0.0.1"
+authors = [{ name = "Jose A" }]
+description = ""
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+[project.optional-dependencies]
+dev = ['build', 'twine', 'hatchling', 'pytest']
+
+
+[project.urls]
+Homepage = "https://github.com/jose-pr//"
+Issues = "https://github.com/jose-pr//issues"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.*"]
