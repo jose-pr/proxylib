@@ -3,10 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = ""
+name = "proxylib"
 version = "0.0.1"
 authors = [{ name = "Jose A" }]
-description = ""
+description = "Proxy models and functions to build proxy configurations or get the systems proxy information and parse their result"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
@@ -17,11 +17,12 @@ classifiers = [
 dependencies = []
 [project.optional-dependencies]
 dev = ['build', 'twine', 'hatchling', 'pytest']
-
+pac = ['dukpy']
+ifaddr = ['ifaddr']
 
 [project.urls]
-Homepage = "https://github.com/jose-pr//"
-Issues = "https://github.com/jose-pr//issues"
+Homepage = "https://github.com/jose-pr/proxylib/"
+Issues = "https://github.com/jose-pr/proxylib/issues"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/.*"]
