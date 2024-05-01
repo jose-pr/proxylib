@@ -36,3 +36,7 @@ def get_ip(address: str):
         return ip
     except:
         return None
+
+
+def get_default_port(scheme: str):
+    return _socket.getservbyname(scheme)

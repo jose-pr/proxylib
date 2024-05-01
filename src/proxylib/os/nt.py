@@ -1,7 +1,7 @@
 import winreg as _reg
 
 from ..env import EnvProxyConfig
-from ..utils import SimpleProxyMap
+from ..proxy import SimpleProxyMap
 
 
 def _queryvalue(key: _reg.HKEYType, subkey: str) -> str:

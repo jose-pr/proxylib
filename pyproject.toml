@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxylib"
-version = "0.5.5"
+version = "0.5.9"
 authors = [{ name = "Jose A" }]
 description = "Proxy models and functions to build proxy configurations or get the systems proxy information and parse their result"
 readme = "README.md"
