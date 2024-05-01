@@ -4,7 +4,6 @@ from typing import Iterable as _Iter
 
 from .netutils import get_ip, get_local_interfaces
 from .proxy import URL, Proxy, ProxyMap
-from .utils import get_proxymap_for
 
 __all__ = ("EnvProxyConfig",)
 
@@ -18,8 +17,8 @@ class EnvProxyConfig(ProxyMap):
         https_proxy: "str|Proxy|None",
         no_proxy: "_Iter[str]",
     ) -> None:
-        self.http_proxy = get_proxymap_for(http_proxy)
-        self.https_proxy = get_proxymap_for(https_proxy)
+        self.http_proxy = ProxyMap(http_proxy)
+        self.https_proxy = ProxyMap(https_proxy)
         self.no_proxy = (
             [
                 re.compile(re.escape(_no) + ".*") if _no != "<local>" else None

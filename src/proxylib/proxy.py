@@ -1,8 +1,10 @@
 import re
-from abc import ABC
+import typing
 from enum import Enum
-from socket import getservbyname
-from typing import Iterable, NamedTuple, Protocol, overload, runtime_checkable
+from typing import Iterable, NamedTuple, Protocol, runtime_checkable
+from urllib.parse import urlsplit
+
+from . import netutils
 
 ALPHA = r"A-Za-z"
 DIGIT = r"0-9"
@@ -15,11 +17,11 @@ AUTHORITY = (
 DELIM = r"(?:;|^)\s*"
 
 
-__all__ = ["Proxy", "ProxyMap", "UriSplit"]
+__all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap"]
 
 
 class UriSplit(Enum):
-    Default = re.compile(rf"{DELIM}(?:(?:({SCHEME})://)?(?:{AUTHORITY})?\s*)")
+    Default = re.compile(rf"{DELIM}(?:(?:({SCHEME}):)?(?://{AUTHORITY})?\s*)")
     PAC = re.compile(rf"{DELIM}({SCHEME})(?:\s+(?:{AUTHORITY})?\s*)?")
 
     def match(self, uri: str):
@@ -52,7 +54,7 @@ class _URI(NamedTuple):
                 self.username,
                 self.password,
                 self.host,
-                getservbyname(self.scheme),
+                netutils.get_default_port(self.scheme),
             )
 
     def as_uri(self):
@@ -118,7 +120,9 @@ class Proxy(_URI):
         if port:
             port = int(port)
 
-        return super().__new__(cls, scheme, username, password, host, port)
+        return super().__new__(
+            cls, scheme, username or "", password or "", host or "", port or 0
+        )
 
     @property
     def url(self):
@@ -127,5 +131,55 @@ class Proxy(_URI):
 
 @runtime_checkable
 class ProxyMap(Protocol):
+    def __new__(cls, *args, **kwargs):
+        src: str | Proxy = args[0] if args else None
+        if cls is ProxyMap:
+            if isinstance(src, str):
+                try:
+                    _proxy = Proxy.find_all(src)
+                except:
+                    _proxy = ()
+                if len(_proxy) == 1:
+                    _proxy = _proxy[0]
+                    netloc = _proxy.netloc
+
+                    if (
+                        _proxy.scheme in ["http", "https", "file"]
+                        and not src.endswith(netloc)
+                        or src.endswith(netloc + "/")
+                        or (_proxy.scheme == "file" and not netloc)
+                    ):
+                        from . import pac
+
+                        return pac.load(src)
+            return object.__new__(SimpleProxyMap)
+
+        return object.__new__(cls)
+
     def __getitem__(self, uri: str) -> Iterable[Proxy]:
         raise NotImplementedError()
+
+    def get(self, uri: str, default=None):
+        try:
+            return self[uri]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: object) -> bool:
+        try:
+            self[key]
+            return True
+        except KeyError:
+            return False
+
+
+class SimpleProxyMap(ProxyMap):
+    def __init__(self, proxy: "Proxy|typing.Sequence[Proxy]|str" = None) -> None:
+        if isinstance(proxy, str):
+            proxy = Proxy.find_all(proxy, UriSplit.PAC)
+        self.proxies: typing.Sequence[Proxy] = (
+            proxy if isinstance(proxy, typing.Sequence) else (proxy,)
+        )
+
+    def __getitem__(self, uri: str):
+        return self.proxies

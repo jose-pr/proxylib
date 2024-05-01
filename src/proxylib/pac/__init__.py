@@ -2,11 +2,13 @@ import datetime as _datetime
 import ipaddress as _ip
 import socket as _socket
 from fnmatch import fnmatch as _shexpmatch
+from pathlib import Path
 from typing import Iterable as _Iter
 from typing import Literal as _Literal
 from typing import cast as _cast
 from typing import get_args as _args
 from typing import overload as _overload
+from urllib.parse import urlparse
 from urllib.request import urlopen as _urlopen
 from warnings import warn as _warn
 
@@ -88,7 +90,7 @@ class PAC(object):
     #### HOSTNAME FUNCTIONS ####
 
     @staticmethod
-    def isPlainHostname(host: str):
+    def isPlainHostName(host: str):
         return "." not in host
 
     @staticmethod
@@ -124,14 +126,24 @@ class PAC(object):
         return "DIRECT"
 
     def __getitem__(self, url: str) -> _Iter[Proxy]:
-        parsed = UriSplit.Default.match(url)
-        if not parsed:
-            raise ValueError(url)
-        scheme, user, p, host, port = parsed.groups()
+        parsed = urlparse(url)
         pac_proxies = self.FindProxyForURL(
-            f"{scheme}://{host}{f':{port}' if port else ''}", host
+            f"{parsed.scheme}://{parsed.netloc}", parsed.hostname or ""
         )
         return Proxy.find_all(pac_proxies, UriSplit.PAC)
+
+    def get(self, uri: str, default=None):
+        try:
+            return self[uri]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: object) -> bool:
+        try:
+            self[key]
+            return True
+        except KeyError:
+            return False
 
 
 try:
@@ -147,10 +159,18 @@ except ImportError:
 
 
 def load(url: str, **urllib_kwds):
-    if "://" not in url:
-        url = ("file://" if url.startswith("/") else "https://") + url
-    with _urlopen(url, **urllib_kwds) as resp:
-        js = _cast(bytes, resp.read()).decode()
+    js = None
+    if "FindProxyForURL(" in url:
+        js = url
+    elif "://" not in url:
+        if url.startswith("file:"):
+            js = Path(url.removeprefix("file:")).read_text()
+        else:
+            url = "https://" + url
+    if js is None:
+        with _urlopen(url, **urllib_kwds) as resp:
+            js = _cast(bytes, resp.read()).decode()
+
     if "FindProxyForURL" not in js:
         raise Exception("Not FindProxyForURL found int response from: " + url)
     if not _jspac:
