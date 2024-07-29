@@ -11,7 +11,7 @@ if os.name == "nt":
 else:
 
     def system_proxy() -> "ProxyMap|str":
-        return EnvProxyConfig.from_env()
+        return os.environ.get('PROXY_PAC') or EnvProxyConfig.from_env()
 
 
 def auto_proxy(**urlopen_kwargs) -> ProxyMap:
