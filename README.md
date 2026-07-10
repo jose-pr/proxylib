@@ -30,6 +30,8 @@ Zero required runtime dependencies; a couple of optional extras unlock more (see
 - **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup. Used directly by
   `system_proxy()` on any platform/desktop whose own auto-detect setting is on, and as
   a generic last-resort fallback in `auto_proxy()` when nothing else is configured.
+  Results (including "no WPAD server here") are cached for 5 minutes so repeated
+  lookups don't re-probe the network.
 - **`requests` integration** — a `ProxyMapAdapter` Transport Adapter that resolves the
   proxy from the real request URL (not just scheme+host).
 - **`urllib.request` integration** — `ProxyMapHandler`, the same idea as
@@ -73,6 +75,15 @@ response = session.get("https://example.com")
 `ProxyMapAdapter` is the recommended integration: it hooks `HTTPAdapter.send()`, so it
 sees the real request URL (scheme, host *and* path) — exactly what a PAC file's
 `FindProxyForURL` is meant to receive.
+
+When you don't need that fidelity (no PAC path rules), `ProxyDict` is the simpler
+option — a drop-in for any plain proxies dict:
+
+```python
+from proxylib import auto_proxy, ProxyDict
+
+requests.get("https://example.com", proxies=ProxyDict(auto_proxy()))
+```
 
 ### ...or with plain `urllib.request`
 
@@ -128,7 +139,7 @@ like a PAC file/URL is loaded with `load_pac`.
 
 | Module | Purpose |
 | --- | --- |
-| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, URI parsing |
+| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ProxyDict`, URI parsing |
 | `proxylib.env` | `EnvProxyConfig` — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` |
 | `proxylib.os` | `system_proxy()` / `auto_proxy()` — platform dispatch + WPAD fallback |
 | `proxylib.os.nt` / `.darwin` | Windows (WinHTTP API) / macOS (`scutil`) system proxy backends |
@@ -136,9 +147,9 @@ like a PAC file/URL is loaded with `load_pac`.
 | `proxylib.pac` | `PAC`, `JSProxyAutoConfig`, `load()` — PAC utility functions + evaluation |
 | `proxylib.pac.wpad` | `discover()` — DNS+HTTP WPAD auto-discovery |
 | `proxylib.pac.javascript` | `JSContext` — the `dukpy`-backed JS execution engine |
-| `proxylib.requests` | `ProxyMapAdapter` (recommended), `RequestsProxies` (legacy dict shim) |
+| `proxylib.requests` | `ProxyMapAdapter` (recommended); `RequestsProxies` is a back-compat alias of `ProxyDict` |
 | `proxylib.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
-| `proxylib.netutils` | `get_ip`, `get_default_port`, `get_local_interfaces` |
+| `proxylib.netutils` | `get_ip`, `get_default_port`, `get_local_interfaces`, `first_working_proxy` |
 
 Every `ProxyMap` implementation (`SimpleProxyMap`, `EnvProxyConfig`, `PAC`, ...) answers
 the same question: `proxymap[url]` returns the sequence of `Proxy` (or `None` for
@@ -199,6 +210,10 @@ published to GitHub Pages on every release (see above). To preview locally:
   expected format. `nmcli`, when available, is preferred and doesn't have this caveat.
 - `dateRange`/`timeRange` implement the documented PAC overload shapes but haven't been
   exhaustively verified against every real-world PAC file's edge cases.
+- **No automatic proxy failover** — `ProxyMapAdapter`/`ProxyMapHandler` use the first
+  proxy a `ProxyMap` returns; they don't retry the rest of a `PROXY a; PROXY b; DIRECT`
+  chain on connection failure. Use `first_working_proxy(proxymap[url])` to pre-select
+  a reachable entry when you need that.
 
 ## License
 

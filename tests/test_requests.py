@@ -5,6 +5,12 @@ from proxylib import Proxy, ProxyMapAdapter, RequestsProxies, SimpleProxyMap
 requests = pytest.importorskip("requests")
 
 
+def test_requests_proxies_is_alias_of_proxydict():
+    from proxylib import ProxyDict
+
+    assert RequestsProxies is ProxyDict
+
+
 def test_requests_proxies_returns_uri_for_proxy():
     proxymap = SimpleProxyMap(Proxy.from_str("http://proxy:8080"))
     rp = RequestsProxies(proxymap)

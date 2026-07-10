@@ -28,7 +28,7 @@ AUTHORITY = (
 DELIM = r"(?:;|^)\s*"
 
 
-__all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap"]
+__all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap", "ProxyDict"]
 
 
 class UriSplit(Enum):
@@ -247,3 +247,40 @@ class SimpleProxyMap(ProxyMap):
 
     def __getitem__(self, uri: str) -> Sequence[Optional[Proxy]]:
         return self.proxies
+
+
+class ProxyDict(ProxyMap):
+    """Duck-types the plain ``{scheme_or_url: "proxy://uri"}`` proxies dict that
+    ``requests`` and similar libraries accept, resolving from a ``ProxyMap``.
+
+    The simpler integration when a Transport Adapter/handler isn't wanted::
+
+        requests.get(url, proxies=ProxyDict(proxymap))
+
+    Consumers of a proxies dict look keys up by scheme/host, not the full
+    request URL, so path-dependent rules (most PAC scripts) won't apply --
+    use ``ProxyMapAdapter``/``ProxyMapHandler`` when that fidelity matters.
+
+    Lookups return the first proxy's URI string; DIRECT raises ``KeyError``
+    (a missing key means "no proxy", matching the dict convention).
+    """
+
+    __slots__ = ("proxymap",)
+
+    def __init__(self, proxymap: ProxyMap) -> None:
+        self.proxymap = proxymap
+
+    def __getitem__(self, uri: str) -> str:
+        try:
+            proxy = next(iter(self.proxymap[uri]))
+            if proxy is None:
+                raise KeyError(uri)
+            return proxy.as_uri()
+        except StopIteration:
+            raise KeyError(uri)
+
+    def copy(self) -> "ProxyDict":
+        return type(self)(self.proxymap)
+
+    def setdefault(self, url: str, value: str) -> None:
+        """No-op: requests calls this to merge env proxies; the ProxyMap wins."""

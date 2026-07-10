@@ -8,12 +8,19 @@ access to the OS's DHCP lease data, which has no portable stdlib-only path.
 from __future__ import annotations
 
 import socket
-from typing import Iterator, Optional
+import time
+from typing import Dict, Iterator, Optional, Tuple
 from urllib.error import URLError
 
 from . import PAC, load
 
 __all__ = ("discover",)
+
+# Discovery results memoized per fqdn: (monotonic timestamp, result).
+# Negative results (None) are cached too -- that's the case that matters
+# most, since "auto-detect on, but no WPAD server" would otherwise re-walk
+# DNS lookups and HTTP probes with multi-second timeouts on every call.
+_cache: "Dict[str, Tuple[float, Optional[PAC]]]" = {}
 
 
 def _candidate_domains(fqdn: str) -> Iterator[str]:
@@ -27,12 +34,7 @@ def _candidate_domains(fqdn: str) -> Iterator[str]:
         yield ".".join(labels[i:])
 
 
-def discover(fqdn: "Optional[str]" = None, timeout: float = 3.0, **urllib_kwds) -> "Optional[PAC]":
-    """Try each ``http://wpad.<domain>/wpad.dat`` from most to least specific.
-
-    Returns the first successfully loaded PAC, or None if discovery fails.
-    """
-    fqdn = fqdn or socket.getfqdn()
+def _discover(fqdn: str, timeout: float, **urllib_kwds) -> "Optional[PAC]":
     for domain in _candidate_domains(fqdn):
         host = f"wpad.{domain}"
         try:
@@ -44,3 +46,26 @@ def discover(fqdn: "Optional[str]" = None, timeout: float = 3.0, **urllib_kwds) 
         except (URLError, OSError, ValueError):
             continue
     return None
+
+
+def discover(
+    fqdn: "Optional[str]" = None,
+    timeout: float = 3.0,
+    cache_ttl: "float|None" = 300.0,
+    **urllib_kwds,
+) -> "Optional[PAC]":
+    """Try each ``http://wpad.<domain>/wpad.dat`` from most to least specific.
+
+    Returns the first successfully loaded PAC, or None if discovery fails.
+    Results (including failures) are cached per fqdn for ``cache_ttl``
+    seconds; pass ``cache_ttl=0`` (or ``None``) to force a fresh probe.
+    """
+    fqdn = fqdn or socket.getfqdn()
+    if cache_ttl:
+        cached = _cache.get(fqdn)
+        if cached is not None and (time.monotonic() - cached[0]) < cache_ttl:
+            return cached[1]
+    result = _discover(fqdn, timeout, **urllib_kwds)
+    if cache_ttl:
+        _cache[fqdn] = (time.monotonic(), result)
+    return result

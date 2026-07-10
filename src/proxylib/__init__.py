@@ -2,6 +2,7 @@
 evaluation (with WPAD discovery), and Transport Adapters for ``requests``/``urllib``."""
 
 from .env import EnvProxyConfig as EnvProxyConfig
+from .netutils import first_working_proxy as first_working_proxy
 from .os import auto_proxy, system_proxy
 from .os.posix.libproxy import LibProxyMap as LibProxyMap
 from .pac import PAC as PAC

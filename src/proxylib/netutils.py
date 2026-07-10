@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import ipaddress as _ip
 import socket as _socket
-from typing import List, Union
+from typing import TYPE_CHECKING, Iterable, List, Optional, Union
+
+if TYPE_CHECKING:
+    # Runtime import would be circular: proxy.py imports this module.
+    from .proxy import Proxy
 
 _Interface = Union[_ip.IPv4Interface, _ip.IPv6Interface]
 
@@ -96,3 +100,33 @@ def get_default_port(scheme: str) -> "int|None":
         return _socket.getservbyname(scheme)
     except OSError:
         return None
+
+
+def first_working_proxy(
+    proxies: "Iterable[Optional[Proxy]]", timeout: float = 5.0
+) -> "Optional[Proxy]":
+    """Return the first entry that accepts a TCP connection, in order.
+
+    Failover helper for ``ProxyMap`` results (``PROXY a; PROXY b; DIRECT``
+    means "try these in order")::
+
+        proxy = first_working_proxy(proxymap[url])
+
+    A ``None`` entry (DIRECT) is returned immediately -- there's no proxy to
+    probe. This only checks TCP reachability of the proxy port, not that the
+    proxy will actually serve the request. Raises ``LookupError`` when no
+    entry is reachable (``None`` can't signal failure here: it means DIRECT).
+    """
+    for proxy in proxies:
+        if proxy is None:
+            return None
+        port = proxy.port or get_default_port(proxy.scheme)
+        if not port:
+            continue
+        try:
+            sock = _socket.create_connection((proxy.host, port), timeout=timeout)
+        except OSError:
+            continue
+        sock.close()
+        return proxy
+    raise LookupError("no reachable proxy in the given list")

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `ProxyDict` (in `proxylib.proxy`): the plain proxies-dict integration,
+  renamed and moved out of the `requests` module since it never actually
+  depended on requests — usable with anything that accepts a
+  `{scheme: proxy_uri}` mapping. `RequestsProxies` remains as a
+  backward-compatible alias.
+- `first_working_proxy()` (in `proxylib.netutils`): failover helper that
+  probes a `ProxyMap` result (`PROXY a; PROXY b; DIRECT`) in order and
+  returns the first entry that accepts a TCP connection.
+- WPAD discovery results (including failures) are now cached per fqdn for 5
+  minutes (`discover(..., cache_ttl=...)` to tune or disable) — previously,
+  "auto-detect on but no WPAD server" re-probed DNS/HTTP with multi-second
+  timeouts on every call.
 - `proxylib.__version__`, resolved lazily from the installed package metadata.
 - `Documentation` project URL (the GitHub Pages docs site) in the package
   metadata shown on PyPI.
