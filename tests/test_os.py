@@ -6,23 +6,19 @@ from proxylib.env import EnvProxyConfig
 from proxylib.proxy import SimpleProxyMap
 
 
-def test_dispatches_to_platform_backend():
+def test_dispatches_to_platform_backend(monkeypatch):
     import proxylib.os as proxylib_os
 
-    if sys.platform == "win32":
-        from proxylib.os.nt import system_proxy as expected
-    elif sys.platform == "darwin":
-        from proxylib.os.darwin import system_proxy as expected
-    else:
-        from proxylib.os.posix import system_proxy as expected
+    sentinel = SimpleProxyMap()
+    monkeypatch.setattr(proxylib_os, "_python_system_proxy", lambda: sentinel)
 
-    assert proxylib_os.system_proxy is expected
+    assert proxylib_os.system_proxy() is sentinel
 
 
 def test_auto_proxy_returns_proxy_map_for_direct_env(monkeypatch):
     import proxylib.os as proxylib_os
 
-    monkeypatch.setattr(proxylib_os, "system_proxy", lambda: SimpleProxyMap())
+    monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": SimpleProxyMap())
     monkeypatch.setattr(
         "proxylib.pac.wpad.discover", lambda *a, **k: None
     )
@@ -35,7 +31,7 @@ def test_auto_proxy_falls_back_to_wpad(monkeypatch):
     import proxylib.os as proxylib_os
     from proxylib.pac import PAC
 
-    monkeypatch.setattr(proxylib_os, "system_proxy", lambda: SimpleProxyMap())
+    monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": SimpleProxyMap())
     sentinel = PAC()
     monkeypatch.setattr("proxylib.pac.wpad.discover", lambda *a, **k: sentinel)
 
@@ -47,7 +43,7 @@ def test_auto_proxy_loads_pac_url_string(monkeypatch):
     import proxylib.os as proxylib_os
     from proxylib.pac import PAC
 
-    monkeypatch.setattr(proxylib_os, "system_proxy", lambda: "file:examples/example.pac")
+    monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": "file:examples/example.pac")
 
     result = proxylib_os.auto_proxy()
     assert isinstance(result, PAC)
@@ -57,10 +53,55 @@ def test_auto_proxy_passes_through_env_config(monkeypatch):
     import proxylib.os as proxylib_os
 
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", [])
-    monkeypatch.setattr(proxylib_os, "system_proxy", lambda: cfg)
+    monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": cfg)
 
     result = proxylib_os.auto_proxy()
     assert result is cfg
+
+
+def test_auto_proxy_passes_provider_through_to_system_proxy(monkeypatch):
+    import proxylib.os as proxylib_os
+
+    seen = []
+    monkeypatch.setattr(
+        proxylib_os, "system_proxy", lambda provider="python": (seen.append(provider), SimpleProxyMap())[1]
+    )
+    monkeypatch.setattr("proxylib.pac.wpad.discover", lambda *a, **k: None)
+
+    proxylib_os.auto_proxy(provider="system")
+    assert seen == ["system"]
+
+
+def test_system_proxy_provider_system_uses_native_provider(monkeypatch):
+    import proxylib.os as proxylib_os
+
+    sentinel = SimpleProxyMap()  # stand-in for a native ProxyMap instance
+    monkeypatch.setattr(proxylib_os, "_native_system_provider", lambda: sentinel)
+
+    assert proxylib_os.system_proxy(provider="system") is sentinel
+
+
+def test_system_proxy_provider_system_falls_back_to_python_when_native_unavailable(monkeypatch):
+    import proxylib.os as proxylib_os
+
+    fallback = SimpleProxyMap()
+    monkeypatch.setattr(proxylib_os, "_native_system_provider", lambda: None)
+    monkeypatch.setattr(proxylib_os, "_python_system_proxy", lambda: fallback)
+
+    assert proxylib_os.system_proxy(provider="system") is fallback
+
+
+def test_system_proxy_provider_python_never_calls_native_provider(monkeypatch):
+    import proxylib.os as proxylib_os
+
+    def boom():
+        raise AssertionError("provider='python' must not touch the native provider")
+
+    monkeypatch.setattr(proxylib_os, "_native_system_provider", boom)
+    monkeypatch.setattr(proxylib_os, "_python_system_proxy", lambda: SimpleProxyMap())
+
+    proxylib_os.system_proxy(provider="python")
+    proxylib_os.system_proxy()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows WinHTTP backend")
@@ -368,6 +409,19 @@ def test_cfnetworkproxymap_passes_deadline_through(monkeypatch):
 
     darwin.CFNetworkProxyMap(deadline=2.5)["http://example.com"]
     assert seen == {"url": "http://example.com", "deadline": 2.5}
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="real CFNetwork/CoreFoundation call")
+def test_cfnetworkproxymap_real_smoke():
+    # No mocking at all: exercises the real CFNetworkCopySystemProxySettings/
+    # CFNetworkCopyProxiesForURL ctypes calls end-to-end against this
+    # machine's actual config -- the only thing that can actually validate
+    # the hand-written CFNetwork bindings (see the UNVERIFIED note on
+    # CFNetworkProxyMap; this test is what removes that caveat once green).
+    import proxylib.os.darwin as darwin
+
+    result = list(darwin.CFNetworkProxyMap()["http://example.com"])
+    assert all(p is None or isinstance(p, darwin.Proxy) for p in result)
 
 
 def test_darwin_system_proxy_manual_proxy(monkeypatch):
