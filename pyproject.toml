@@ -4,12 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxylib"
-version = "0.6.0"
+version = "1.0.0rc1"
 authors = [{ name = "Jose A" }]
-description = "Platform-agnostic proxy configuration: detect system/env proxy settings, evaluate PAC files (with WPAD discovery), and wire the result into requests"
+description = "Platform-agnostic proxy configuration: detect system/env proxy settings, evaluate PAC files (with WPAD discovery), and wire the result into requests or urllib"
 readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
