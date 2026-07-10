@@ -1,7 +1,18 @@
+"""Core proxy/URI types: parsing proxy strings and mapping request URLs to proxies.
+
+``Proxy`` models a single ``scheme://[user[:pass]@]host[:port]`` proxy entry
+(as found in ``PROXY``/env-var/PAC proxy strings). ``ProxyMap`` is the
+protocol every proxy-selection strategy in this library implements
+(``EnvProxyConfig``, ``pac.PAC``, ``SimpleProxyMap``): given a request URL it
+returns the sequence of ``Proxy`` (or ``None`` for DIRECT) to try, in order.
+"""
+
+from __future__ import annotations
+
 import re
 import typing
 from enum import Enum
-from typing import Iterable, NamedTuple, Protocol, runtime_checkable
+from typing import Iterable, NamedTuple, Optional, Protocol, Sequence, Union, runtime_checkable
 from urllib.parse import urlsplit
 
 from . import netutils
@@ -21,6 +32,8 @@ __all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap"]
 
 
 class UriSplit(Enum):
+    """Regexes for splitting either a plain URI or a PAC ``PROXY ...; ...`` string."""
+
     Default = re.compile(rf"{DELIM}(?:(?:({SCHEME}):)?(?://{AUTHORITY})?\s*)")
     PAC = re.compile(rf"{DELIM}({SCHEME})(?:\s+(?:{AUTHORITY})?\s*)?")
 
@@ -36,28 +49,28 @@ class _URI(NamedTuple):
     username: str
     password: str
     host: str
-    port: "int|None"
+    port: Optional[int]
 
     @property
-    def netloc(self):
+    def netloc(self) -> str:
         if self.port:
             return f"{self.host}:{self.port}"
         else:
             return self.host
 
-    def resolved(self):
+    def resolved(self) -> "_URI":
+        """Return a copy with the scheme's conventional port filled in if missing."""
         if self.port:
             return self
-        else:
-            self.__class__(
-                self.scheme,
-                self.username,
-                self.password,
-                self.host,
-                netutils.get_default_port(self.scheme),
-            )
+        return self.__class__(
+            self.scheme,
+            self.username,
+            self.password,
+            self.host,
+            netutils.get_default_port(self.scheme),
+        )
 
-    def as_uri(self):
+    def as_uri(self) -> str:
         authority = self.netloc
         userinfo = ""
         if self.username:
@@ -77,11 +90,16 @@ class _URI(NamedTuple):
         cls,
         uri: str,
         format: UriSplit = UriSplit.Default,
-    ):
-        return cls(*format.match(uri).groups()) if uri else None
+    ) -> "Optional[_URI]":
+        if not uri:
+            return None
+        match = format.match(uri)
+        if not match:
+            raise ValueError(f"Could not parse {uri!r} as a {format.name} URI")
+        return cls(*match.groups())
 
     @classmethod
-    def find_all(cls, uris: str, format: UriSplit = UriSplit.Default):
+    def find_all(cls, uris: str, format: UriSplit = UriSplit.Default) -> "list[_URI]":
         return [cls(*uri) for uri in format.findall(uris)] if uris else []
 
 
@@ -89,8 +107,8 @@ class URL(_URI):
     _DEFAULT_SCHEME = "http"
 
     def __new__(
-        cls, scheme: str, username: str, password: str, host: str, port: str
-    ) -> "Proxy":
+        cls, scheme: str, username: str, password: str, host: str, port: "str|int|None"
+    ) -> "URL":
         scheme = scheme.lower()
         if not scheme:
             scheme = cls._DEFAULT_SCHEME
@@ -102,11 +120,22 @@ class URL(_URI):
 
 
 class Proxy(_URI):
+    """A single proxy authority, e.g. ``http://user:pass@proxy.example.com:8080``.
+
+    ``Proxy("direct", ...)`` returns ``None`` (the sentinel used everywhere in
+    this library to mean "connect without a proxy") rather than an instance.
+    """
+
     _DEFAULT_SCHEME = "http"
 
     def __new__(
-        cls, scheme: str, username: str, password: str, host: str, port: str
-    ) -> "Proxy":
+        cls,
+        scheme: str,
+        username: "str|None",
+        password: "str|None",
+        host: "str|None",
+        port: "str|int|None",
+    ) -> "Optional[Proxy]":
         scheme = scheme.lower()
         if scheme == "direct":
             return None
@@ -125,38 +154,33 @@ class Proxy(_URI):
         )
 
     @property
-    def url(self):
+    def url(self) -> str:
         return f"{self.scheme}://{self.netloc}"
 
 
 @runtime_checkable
 class ProxyMap(Protocol):
+    """Protocol for "given a request URL, which proxies should I try?".
+
+    Calling ``ProxyMap(src)`` is a small factory: a plain proxy-authority
+    string builds a ``SimpleProxyMap``, but a string that looks like a URL to
+    a PAC file/script is loaded as one (see :mod:`proxylib.pac`).
+    """
+
     def __new__(cls, *args, **kwargs):
-        src: str | Proxy = args[0] if args else None
+        src: "str|Proxy|None" = args[0] if args else None
         if cls is ProxyMap:
             if isinstance(src, str):
-                try:
-                    _proxy = Proxy.find_all(src)
-                except:
-                    _proxy = ()
-                if len(_proxy) == 1:
-                    _proxy = _proxy[0]
-                    netloc = _proxy.netloc
+                looks_like_pac_source = _looks_like_pac_source(src)
+                if looks_like_pac_source:
+                    from . import pac
 
-                    if (
-                        _proxy.scheme in ["http", "https", "file"]
-                        and not src.endswith(netloc)
-                        or src.endswith(netloc + "/")
-                        or (_proxy.scheme == "file" and not netloc)
-                    ):
-                        from . import pac
-
-                        return pac.load(src)
+                    return pac.load(src)
             return object.__new__(SimpleProxyMap)
 
         return object.__new__(cls)
 
-    def __getitem__(self, uri: str) -> Iterable[Proxy]:
+    def __getitem__(self, uri: str) -> Iterable[Optional[Proxy]]:
         raise NotImplementedError()
 
     def get(self, uri: str, default=None):
@@ -173,13 +197,48 @@ class ProxyMap(Protocol):
             return False
 
 
-class SimpleProxyMap(ProxyMap):
-    def __init__(self, proxy: "Proxy|typing.Sequence[Proxy]|str" = None) -> None:
-        if isinstance(proxy, str):
-            proxy = Proxy.find_all(proxy, UriSplit.PAC)
-        self.proxies: typing.Sequence[Proxy] = (
-            proxy if isinstance(proxy, typing.Sequence) else (proxy,)
-        )
+def _looks_like_pac_source(src: str) -> bool:
+    """Heuristic: does this string point at a PAC file/URL rather than name a single proxy authority?
 
-    def __getitem__(self, uri: str):
+    A bare authority like ``http://proxy:8080`` parses as exactly one
+    ``Proxy`` whose ``netloc`` is the whole (non-scheme) part of ``src``. If
+    ``src`` has more to it than that authority (a path, e.g.
+    ``http://internal/proxy.pac``), or it's a ``file:`` reference, treat it
+    as a PAC source instead.
+    """
+    try:
+        proxies = Proxy.find_all(src)
+    except Exception:
+        return False
+    if len(proxies) != 1:
+        return False
+    proxy = proxies[0]
+    netloc = proxy.netloc
+    # Preserves the original grouping: (A and B) or C or D
+    is_url_scheme_with_extra_path = proxy.scheme in ("http", "https", "file") and (
+        not src.endswith(netloc)
+    )
+    ends_with_netloc_slash = src.endswith(netloc + "/")
+    is_bare_file_authority = proxy.scheme == "file" and not netloc
+    return is_url_scheme_with_extra_path or ends_with_netloc_slash or is_bare_file_authority
+
+
+class SimpleProxyMap(ProxyMap):
+    """A ``ProxyMap`` that always returns the same fixed proxy (or list of proxies)."""
+
+    def __init__(self, proxy: "Proxy|Sequence[Optional[Proxy]]|str|None" = None) -> None:
+        if isinstance(proxy, str):
+            # PAC-style strings ("DIRECT", "PROXY host:port; DIRECT") have no
+            # "://"; URL-style strings ("http://host:port", the conventional
+            # HTTP_PROXY/HTTPS_PROXY env var format) do.
+            fmt = UriSplit.Default if "://" in proxy else UriSplit.PAC
+            proxy = Proxy.find_all(proxy, fmt)
+        if proxy is None or isinstance(proxy, Proxy):
+            self.proxies: Sequence[Optional[Proxy]] = (proxy,)
+        elif isinstance(proxy, typing.Sequence):
+            self.proxies = proxy
+        else:
+            self.proxies = (proxy,)
+
+    def __getitem__(self, uri: str) -> Sequence[Optional[Proxy]]:
         return self.proxies

@@ -1,5 +1,12 @@
+"""Runs a PAC script as real JavaScript via ``dukpy``, exposing every
+``PAC`` static/class method (and any subclass adds) into the JS global scope
+so ``FindProxyForURL`` can call them.
+"""
+
+from __future__ import annotations
+
 from abc import ABCMeta
-from typing import OrderedDict, Sequence
+from typing import Dict, List, OrderedDict, Sequence
 
 from dukpy import JSInterpreter
 
@@ -7,14 +14,18 @@ __all__ = ["JSContext"]
 
 
 class JSContextMeta(ABCMeta):
+    """Collects every alpha-leading attribute (methods) of a class and its
+    bases into ``_JSCONTEXT``, the set of functions exported into the JS engine.
+    """
+
     def __new__(
         metaclass: "type[JSContext]",
         cls_name: str,
         base_classes: Sequence[object],
-        cls_builder: OrderedDict[str, object],
+        cls_builder: "OrderedDict[str, object]",
     ):
-        jsContext: "dict[str, object]" = cls_builder.pop("_JSCONTEXT", {})
-        exclude: "list[str]" = cls_builder.get("_JSCONTEXT_EXCLUDE", [])
+        jsContext: "Dict[str, object]" = cls_builder.pop("_JSCONTEXT", {})
+        exclude: "List[str]" = cls_builder.get("_JSCONTEXT_EXCLUDE", [])
         for key, val in cls_builder.items():
             if key[0].isalpha():
                 jsContext.setdefault(key, val)
@@ -50,6 +61,8 @@ class JSContextMeta(ABCMeta):
 
 
 class JSContext(metaclass=JSContextMeta):
+    """Base class that boots a ``dukpy`` engine with ``_JSCONTEXT`` exported, then evals ``js``."""
+
     def __init__(self, js: str) -> None:
         context: dict = object.__getattribute__(self, "_JSCONTEXT")
         engine = JSInterpreter()
@@ -59,7 +72,7 @@ class JSContext(metaclass=JSContextMeta):
             elif isinstance(val, classmethod):
                 val = val.__get__(self.__class__)
             elif isinstance(val, property):
-                raise Exception("Not supported yet")
+                raise NotImplementedError("JSContext does not support property exports yet")
             else:
                 val = val.__get__(self)
 

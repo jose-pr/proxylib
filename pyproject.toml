@@ -4,21 +4,28 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxylib"
-version = "0.5.9"
+version = "0.6.0"
 authors = [{ name = "Jose A" }]
-description = "Proxy models and functions to build proxy configurations or get the systems proxy information and parse their result"
+description = "Platform-agnostic proxy configuration: detect system/env proxy settings, evaluate PAC files (with WPAD discovery), and wire the result into requests"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Typing :: Typed",
 ]
 dependencies = []
 [project.optional-dependencies]
 dev = ['build', 'twine', 'hatchling', 'pytest', 'requests']
 jspac = ['dukpy']
 ifaddr = ['ifaddr']
+requests = ['requests']
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/proxylib/"
@@ -26,3 +33,10 @@ Issues = "https://github.com/jose-pr/proxylib/issues"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/.*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/proxylib"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
