@@ -85,6 +85,27 @@ def test_proxy_map_dispatches_bare_authority_to_simple_map():
     assert isinstance(m, SimpleProxyMap)
 
 
+def test_proxy_map_trailing_slash_is_a_proxy_not_a_pac():
+    # HTTP_PROXY-style values are very commonly written with a trailing
+    # slash; that used to be misrouted to pac.load() (network I/O + failure).
+    m = ProxyMap("http://proxy.example.com:8080/")
+    assert isinstance(m, SimpleProxyMap)
+    assert m["http://x"][0].netloc == "proxy.example.com:8080"
+
+
 def test_proxy_map_dispatches_pac_path_to_pac_loader():
     m = ProxyMap("file:examples/example.pac")
     assert not isinstance(m, SimpleProxyMap)
+
+
+def test_uri_from_str_bare_hostname_raises_value_error():
+    # "example.com" matches the URI regex with every group empty; it must be
+    # a clear ValueError, not an AttributeError on None later.
+    with pytest.raises(ValueError):
+        URL.from_str("example.com")
+
+
+def test_package_exposes_version():
+    import proxylib
+
+    assert isinstance(proxylib.__version__, str) and proxylib.__version__

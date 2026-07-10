@@ -12,3 +12,13 @@ from .proxy import *
 from .requests import ProxyMapAdapter as ProxyMapAdapter
 from .requests import RequestsProxies
 from .urllib import ProxyMapHandler as ProxyMapHandler
+
+
+def __getattr__(name: str):
+    # PEP 562: resolve __version__ lazily from the installed metadata so it
+    # never drifts from pyproject.toml and costs nothing at import time.
+    if name == "__version__":
+        from importlib.metadata import version
+
+        return version("proxylib")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

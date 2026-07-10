@@ -76,6 +76,24 @@ def test_pac_FindProxyForURL_default_direct():
     assert pac["http://example.com"] == [None]
 
 
+def test_pac_findproxyforurl_receives_full_url():
+    # The PAC spec passes the complete URL (path/query included) -- that's
+    # the whole point of resolving per-request in the adapters. It used to
+    # be truncated to scheme://netloc.
+    seen = {}
+
+    class Spy(PAC):
+        @staticmethod
+        def FindProxyForURL(url, host, /):
+            seen["url"] = url
+            seen["host"] = host
+            return "DIRECT"
+
+    Spy()["https://example.com/some/path?q=1"]
+    assert seen["url"] == "https://example.com/some/path?q=1"
+    assert seen["host"] == "example.com"
+
+
 def test_example_pac_file():
     proxies = load_pac("file:examples/example.pac")
     assert proxies["http://plain/test"] == [None]

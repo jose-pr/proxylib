@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `proxylib.__version__`, resolved lazily from the installed package metadata.
+- `Documentation` project URL (the GitHub Pages docs site) in the package
+  metadata shown on PyPI.
+- PEP 639 `license = "MIT"` / `license-files` metadata (replaces the license
+  classifier).
+
+### Changed
+
+- `PAC` lookups now pass the **full request URL** (path and query included) to
+  `FindProxyForURL`, per the PAC spec, instead of truncating to
+  `scheme://netloc` — PAC scripts with path-based rules now work.
+- `EnvProxyConfig` no longer resolves DNS on every lookup; resolution only
+  happens when a `NO_PROXY` `<local>` entry actually needs it.
+- libproxy's shared library is now located lazily on first use instead of at
+  `import proxylib` time.
+
+### Fixed
+
+- Proxy URLs with a trailing slash (`HTTP_PROXY=http://proxy:8080/`, a very
+  common shape) were misclassified as PAC-file URLs and routed to the PAC
+  loader, which tried to fetch the proxy itself as a PAC script and failed.
+  Both the `ProxyMap(...)` factory and `EnvProxyConfig` are fixed
+  (`EnvProxyConfig` additionally never treats proxy values as PAC sources —
+  `PROXY_PAC`/OS PAC settings cover that separately).
+- `URL.from_str("example.com")` (bare hostname) now raises a clear
+  `ValueError` instead of crashing with `AttributeError` later.
+- `JSContextMeta` compared the first *character* of attribute names against
+  `_JSCONTEXT_EXCLUDE` instead of the name itself (dormant — the exclude list
+  was unused).
+
 ## [1.0.0-rc.1] - 2026-07-09
 
 First tracked release. `proxylib` graduates from a small proxy-string-parsing

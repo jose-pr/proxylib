@@ -46,10 +46,19 @@ def _load_libproxy() -> "Optional[ctypes.CDLL]":
     return lib
 
 
-# Loaded once at import time (cheap: find_library() just searches the
-# dynamic linker's paths; nothing here does real work until a factory is
-# actually created).
-_libproxy = _load_libproxy()
+# Loaded lazily on first use (and memoized): `import proxylib` shouldn't
+# scan the dynamic linker's search paths on platforms where libproxy will
+# never exist. Tests monkeypatch `_libproxy` directly, which takes
+# precedence over the lazy load.
+_UNLOADED = object()
+_libproxy: "Optional[ctypes.CDLL]" = _UNLOADED  # type: ignore[assignment]
+
+
+def _get_libproxy() -> "Optional[ctypes.CDLL]":
+    global _libproxy
+    if _libproxy is _UNLOADED:
+        _libproxy = _load_libproxy()
+    return _libproxy
 
 
 class LibProxyMap(ProxyMap):
@@ -63,7 +72,7 @@ class LibProxyMap(ProxyMap):
     __slots__ = ("_lib",)
 
     def __init__(self, lib: "Optional[ctypes.CDLL]" = None) -> None:
-        self._lib = lib if lib is not None else _libproxy
+        self._lib = lib if lib is not None else _get_libproxy()
 
     def __getitem__(self, uri: str) -> "Iterable[Optional[Proxy]]":
         lib = self._lib
@@ -94,4 +103,5 @@ class LibProxyMap(ProxyMap):
 
 
 def detect() -> "Optional[LibProxyMap]":
-    return LibProxyMap(_libproxy) if _libproxy is not None else None
+    lib = _get_libproxy()
+    return LibProxyMap(lib) if lib is not None else None

@@ -271,10 +271,13 @@ class PAC(object):
         return "DIRECT"
 
     def __getitem__(self, url: str) -> _Iter[_Optional[Proxy]]:
+        # Pass the full URL (path and query included) -- that's what the PAC
+        # spec's FindProxyForURL receives, and the whole reason the
+        # requests/urllib integrations resolve per-request instead of
+        # per-scheme. (Browsers strip https paths for privacy; a PAC file
+        # you configure yourself is trusted with your own URLs.)
         parsed = urlparse(url)
-        pac_proxies = self.FindProxyForURL(
-            f"{parsed.scheme}://{parsed.netloc}", parsed.hostname or ""
-        )
+        pac_proxies = self.FindProxyForURL(url, parsed.hostname or "")
         return Proxy.find_all(pac_proxies, UriSplit.PAC)
 
     def get(self, uri: str, default=None):

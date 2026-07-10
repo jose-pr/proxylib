@@ -94,7 +94,10 @@ class _URI(NamedTuple):
         if not uri:
             return None
         match = format.match(uri)
-        if not match:
+        if not match or not any(match.groups()):
+            # A bare hostname like "example.com" technically "matches" with
+            # every group empty -- reject it clearly instead of building a
+            # URI of Nones that crashes later.
             raise ValueError(f"Could not parse {uri!r} as a {format.name} URI")
         return cls(*match.groups())
 
@@ -109,7 +112,7 @@ class URL(_URI):
     def __new__(
         cls, scheme: str, username: str, password: str, host: str, port: "str|int|None"
     ) -> "URL":
-        scheme = scheme.lower()
+        scheme = (scheme or "").lower()
         if not scheme:
             scheme = cls._DEFAULT_SCHEME
 
@@ -136,7 +139,7 @@ class Proxy(_URI):
         host: "str|None",
         port: "str|int|None",
     ) -> "Optional[Proxy]":
-        scheme = scheme.lower()
+        scheme = (scheme or "").lower()
         if scheme == "direct":
             return None
         elif scheme == "proxy":
@@ -214,13 +217,15 @@ def _looks_like_pac_source(src: str) -> bool:
         return False
     proxy = proxies[0]
     netloc = proxy.netloc
-    # Preserves the original grouping: (A and B) or C or D
-    is_url_scheme_with_extra_path = proxy.scheme in ("http", "https", "file") and (
-        not src.endswith(netloc)
+    # A single trailing "/" is not a path: HTTP_PROXY-style values are very
+    # commonly written "http://proxy:8080/", and treating that as a PAC URL
+    # meant the factory tried to fetch the proxy itself as a PAC script.
+    stripped = src[:-1] if src.endswith("/") else src
+    has_path_beyond_authority = proxy.scheme in ("http", "https", "file") and netloc and (
+        not stripped.endswith(netloc)
     )
-    ends_with_netloc_slash = src.endswith(netloc + "/")
     is_bare_file_authority = proxy.scheme == "file" and not netloc
-    return is_url_scheme_with_extra_path or ends_with_netloc_slash or is_bare_file_authority
+    return bool(has_path_beyond_authority) or is_bare_file_authority
 
 
 class SimpleProxyMap(ProxyMap):

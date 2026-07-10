@@ -49,12 +49,12 @@ class JSContextMeta(ABCMeta):
                 **{
                     key: val
                     for key, val in cls_builder.items()
-                    if not (key[0].isalpha() and key[0] not in exclude)
+                    if not (key[0].isalpha() and key not in exclude)
                 },
                 "_JSCONTEXT": {
                     key: val
                     for key, val in jsContext.items()
-                    if (key[0].isalpha() and key[0] not in exclude)
+                    if (key[0].isalpha() and key not in exclude)
                 },
             },
         )

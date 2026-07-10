@@ -36,6 +36,26 @@ def test_no_proxy_local_bypasses_loopback():
     assert cfg["http://127.0.0.1"] == [None]
 
 
+def test_env_accepts_trailing_slash_proxy_urls():
+    # The common HTTP_PROXY="http://proxy:8080/" shape must build a plain
+    # proxy map -- it used to be misrouted into the PAC loader (network I/O
+    # from the constructor, then failure).
+    cfg = EnvProxyConfig("http://proxy:8080/", "http://sproxy:443/", [])
+    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:8080")]
+    assert list(cfg["https://example.com"]) == [Proxy.from_str("http://sproxy:443")]
+
+
+def test_env_does_not_resolve_dns_without_local_entry(monkeypatch):
+    import proxylib.env as env
+
+    def boom(host):
+        raise AssertionError("DNS resolution attempted without a <local> entry")
+
+    monkeypatch.setattr(env, "get_ip", boom)
+    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["other.com"])
+    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
+
+
 def test_from_env_reads_upper_and_lower_case(monkeypatch):
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)

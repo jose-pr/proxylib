@@ -590,9 +590,14 @@ def test_libproxymap_raises_keyerror_when_factory_creation_fails():
         LibProxyMap(fake)["http://example.com"]
 
 
-def test_libproxymap_raises_keyerror_when_lib_unavailable():
+def test_libproxymap_raises_keyerror_when_lib_unavailable(monkeypatch):
+    # LibProxyMap(None) auto-detects, so pin the module-level lib to "not
+    # found" -- otherwise this test would flip on a machine with a real
+    # libproxy installed.
+    import proxylib.os.posix.libproxy as libproxy
     from proxylib import LibProxyMap
 
+    monkeypatch.setattr(libproxy, "_libproxy", None)
     with pytest.raises(KeyError):
         LibProxyMap(None)["http://example.com"]
     assert LibProxyMap(None).get("http://example.com", "fallback") == "fallback"

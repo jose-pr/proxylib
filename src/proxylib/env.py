@@ -6,7 +6,7 @@ import os
 from typing import Iterable, List, Optional, Tuple
 
 from .netutils import get_ip, get_local_interfaces
-from .proxy import URL, Proxy, ProxyMap
+from .proxy import URL, Proxy, ProxyMap, SimpleProxyMap
 
 __all__ = ("EnvProxyConfig",)
 
@@ -52,8 +52,13 @@ class EnvProxyConfig(ProxyMap):
         https_proxy: "str|Proxy|None",
         no_proxy: "Iterable[str]|None",
     ) -> None:
-        self.http_proxy = ProxyMap(http_proxy)
-        self.https_proxy = ProxyMap(https_proxy)
+        # SimpleProxyMap directly, not the ProxyMap factory: proxy env var
+        # values are never PAC sources (PROXY_PAC/AutoConfigURL cover that
+        # separately in each OS backend), and the factory routing a
+        # PAC-looking value to pac.load() would do network I/O from this
+        # constructor.
+        self.http_proxy: ProxyMap = SimpleProxyMap(http_proxy)
+        self.https_proxy: ProxyMap = SimpleProxyMap(https_proxy)
         self.no_proxy: "List[Tuple[str, int|None]|None]" = (
             [_parse_no_proxy_entry(_no) for _no in dict.fromkeys(no_proxy)]
             if no_proxy
@@ -62,14 +67,19 @@ class EnvProxyConfig(ProxyMap):
 
     def __getitem__(self, url: str) -> Iterable[Optional[Proxy]]:
         uri = URL.from_str(url)
-        ip = get_ip(uri.host)
+        # Resolve DNS lazily: get_ip() is a blocking gethostbyname() call,
+        # only needed for "<local>" entries -- don't pay it per lookup when
+        # no_proxy has none (the overwhelmingly common case).
         for entry in self.no_proxy:
             if entry is None:
                 # "<local>": bypass the proxy for loopback and same-subnet addresses.
-                if ip is not None and ip.is_loopback:
+                ip = get_ip(uri.host)
+                if ip is None:
+                    continue
+                if ip.is_loopback:
                     return [None]
                 for _if in get_local_interfaces():
-                    if ip is not None and ip in _if.network:
+                    if ip in _if.network:
                         return [None]
             elif _no_proxy_matches(uri.host, uri.port, entry):
                 return [None]
