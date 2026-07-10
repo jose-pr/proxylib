@@ -158,7 +158,17 @@ python -m venv .venv/<your-python-version>
 ```
 
 Tests that need `dukpy`/`ifaddr`/`requests` skip automatically if those extras aren't
-installed. See [AGENTS.md](AGENTS.md) for a deeper map of the codebase.
+installed.
+
+### Releasing
+
+This project follows [Semantic Versioning](https://semver.org/) and keeps a
+[`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` (e.g. `v1.0.0`) triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which runs the test
+suite across platforms/Python versions as a gate, builds the sdist/wheel, and creates a
+GitHub Release (with auto-generated release notes and a diff link against the previous
+tag). Publishing to PyPI is wired up but currently disabled until [Trusted
+Publishing](https://docs.pypi.org/trusted-publishers/) is configured for this project.
 
 ## Known limitations
 

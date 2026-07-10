@@ -58,7 +58,7 @@ discovery, full PAC compliance, and integrations for both `requests` and
 ### Fixed
 
 Several of these change observable behavior for anyone relying on the old
-(broken) results — see [AGENTS.md](AGENTS.md) for full detail on each:
+(broken) results:
 
 - `SimpleProxyMap(str)` always parsed with the PAC grammar (`PROXY host:port;
   DIRECT`), which has no concept of `"://"` — so `SimpleProxyMap("http://proxy:8080")`
