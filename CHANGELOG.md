@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   matched against IP-literal request hosts.
 - `proxylib.set_default_no_proxy()` / `get_default_no_proxy()`: process-wide
   default `NO_PROXY` rules, merged into every `EnvProxyConfig`.
+- `WinHttpProxyMap` (`proxylib.os.nt`): a `ProxyMap` backed by WinHTTP's own
+  `WinHttpGetProxyForUrl` autoproxy engine — WPAD/DHCP-252 discovery, NTLM/
+  Kerberos SSO for fetching the PAC, and PAC JS execution all happen in the
+  OS, so no `dukpy` is needed on Windows.
+- `CFNetworkProxyMap` (`proxylib.os.darwin`): the macOS equivalent, backed by
+  `CFNetworkCopyProxiesForURL`/`CFNetworkExecuteProxyAutoConfigurationURL`.
+- `provider="system"` param on `auto_proxy()`/`system_proxy()`: opts into the
+  two native resolvers above (or `LibProxyMap` on POSIX, if its shared
+  library is loadable) instead of proxylib's own Python-side detection/PAC
+  path, which remains the default (`provider="python"`).
+- gsettings-based detection (GNOME/MATE) now reads via one
+  `gsettings list-recursively` call instead of up to 7 single-key
+  `gsettings get` calls; `shutil.which` lookups for `gsettings`/`nmcli`/
+  `dbus-send` are now cached (clearable, for tests).
 
 ### Changed
 

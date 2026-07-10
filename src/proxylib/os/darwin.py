@@ -111,10 +111,15 @@ def system_proxy() -> "ProxyMap|str":
 
 # ---- CFNetworkProxyMap: native CFNetwork/CoreFoundation proxy resolution -----
 #
-# UNVERIFIED: written against documented CFNetwork/CoreFoundation API
-# signatures (CFProxySupport.h, CFRunLoop.h) but never executed -- no macOS
-# available in this dev environment. Validate against the Phase 1 macOS CI
-# job before relying on it; see root AGENTS.md for the current status.
+# Written against documented CFNetwork/CoreFoundation API signatures
+# (CFProxySupport.h, CFRunLoop.h); no macOS is available in this dev
+# environment, so this was validated by pushing a throwaway ci-* tag and
+# running tests/test_os.py::test_cfnetworkproxymap_real_smoke (no mocking)
+# against a real macos-latest GitHub Actions runner -- passed on Python 3.9
+# and 3.13 (see root AGENTS.md for the run). That smoke test only confirms
+# the happy path (DIRECT/manual proxy on a runner with nothing configured);
+# the PAC-execution/run-loop-deadline branch is still unexercised by real
+# CI and should be treated with more caution until it is.
 #
 # All ctypes/CFNetwork work is lazy (only touched inside _get_cf_bindings(),
 # called only from _resolve_proxies_for_url(), called only from
@@ -398,9 +403,10 @@ class CFNetworkProxyMap(ProxyMap):
     ``LibProxyMap`` -- so a fallback/chain can proceed) rather than hanging
     or silently returning DIRECT.
 
-    **Unverified**: written against documented CFNetwork/CoreFoundation API
-    signatures but never executed against a real macOS system (none
-    available in this dev environment) -- see root ``AGENTS.md``.
+    Validated by a real (unmocked) smoke test on macOS CI, but only for the
+    common "direct/manual proxy" path -- the PAC-execution/run-loop-deadline
+    branch is not yet exercised by that CI job, so treat it more cautiously.
+    See root ``AGENTS.md`` for details.
     """
 
     __slots__ = ("deadline",)
