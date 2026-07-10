@@ -49,6 +49,40 @@ jobs:
           name: dist
           path: dist/
 
+  docs-build:
+    name: Build documentation site
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/configure-pages@v5
+      - name: Install proxylib with docs tooling
+        run: python -m pip install -e ".[dev,jspac,ifaddr,requests,docs]"
+      - name: Build docs
+        run: mkdocs build --strict
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  docs-deploy:
+    name: Deploy documentation to GitHub Pages
+    needs: docs-build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
   github-release:
     name: Create GitHub Release
     needs: build

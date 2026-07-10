@@ -165,10 +165,22 @@ installed.
 This project follows [Semantic Versioning](https://semver.org/) and keeps a
 [`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` (e.g. `v1.0.0`) triggers
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which runs the test
-suite across platforms/Python versions as a gate, builds the sdist/wheel, and creates a
-GitHub Release (with auto-generated release notes and a diff link against the previous
-tag). Publishing to PyPI is wired up but currently disabled until [Trusted
+suite across platforms/Python versions as a gate, then in parallel: builds the
+sdist/wheel and creates a GitHub Release (with auto-generated release notes and a diff
+link against the previous tag), and builds+publishes the [documentation site](#documentation-site)
+to GitHub Pages. Publishing to PyPI is wired up but currently disabled until [Trusted
 Publishing](https://docs.pypi.org/trusted-publishers/) is configured for this project.
+
+### Documentation site
+
+API reference docs are built with [MkDocs](https://www.mkdocs.org/) +
+[mkdocstrings](https://mkdocstrings.github.io/) from `mkdocs.yml`/`docs/`, and
+published to GitHub Pages on every release (see above). To preview locally:
+
+```bash
+.venv/<your-python-version>/Scripts/pip install -e ".[docs]"
+.venv/<your-python-version>/Scripts/mkdocs serve
+```
 
 ## Known limitations
 

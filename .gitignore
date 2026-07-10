@@ -6,4 +6,5 @@ __pycache__
 [a-zA-Z]*__.*
 /dist
 /.venv
+/site
 AGENTS.md
