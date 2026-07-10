@@ -112,11 +112,6 @@ jobs:
     name: Publish to PyPI
     needs: github-release
     runs-on: ubuntu-latest
-    # Disabled until PyPI Trusted Publishing is configured for this repo:
-    # on pypi.org, go to the proxylib project -> Publishing -> Add a new
-    # publisher, and register this repo/workflow/environment. Then remove
-    # the `if: false` line below to turn this job on.
-    if: false
     environment:
       name: pypi
       url: https://pypi.org/project/proxylib/

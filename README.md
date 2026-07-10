@@ -166,10 +166,10 @@ This project follows [Semantic Versioning](https://semver.org/) and keeps a
 [`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` (e.g. `v1.0.0`) triggers
 [`.github/workflows/release.yaml`](.github/workflows/release.yaml), which runs the test
 suite across platforms/Python versions as a gate, then in parallel: builds the
-sdist/wheel and creates a GitHub Release (with auto-generated release notes and a diff
-link against the previous tag), and builds+publishes the [documentation site](#documentation-site)
-to GitHub Pages. Publishing to PyPI is wired up but currently disabled until [Trusted
-Publishing](https://docs.pypi.org/trusted-publishers/) is configured for this project.
+sdist/wheel, creates a GitHub Release (with auto-generated release notes and a diff link
+against the previous tag) and publishes it to PyPI via [Trusted
+Publishing](https://docs.pypi.org/trusted-publishers/) (no stored token), and
+builds+publishes the [documentation site](#documentation-site) to GitHub Pages.
 
 ### Documentation site
 
