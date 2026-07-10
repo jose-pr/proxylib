@@ -48,3 +48,24 @@ def test_jsproxyautoconfig_can_call_ms_extension_functions():
     """
     pac = JSProxyAutoConfig(js)
     assert pac["http://example.com/"] == [None]
+
+
+def test_jsproxyautoconfig_dns_domain_levels_and_convert_addr_and_local_host():
+    # The remaining PAC utility functions the example .pac files don't
+    # happen to exercise -- confirm they're at least callable from real JS.
+    js = """
+    function FindProxyForURL(url, host) {
+        if (dnsDomainLevels(host) !== 3) {
+            return "PROXY wrong-levels.example.com:8080";
+        }
+        if (convert_addr("0.0.0.1") !== 1) {
+            return "PROXY wrong-convert-addr.example.com:8080";
+        }
+        if (!localHostOrDomainIs("www", "www.example.com")) {
+            return "PROXY wrong-local-host.example.com:8080";
+        }
+        return "DIRECT";
+    }
+    """
+    pac = JSProxyAutoConfig(js)
+    assert pac["http://sub.example.com/"] == [None]
