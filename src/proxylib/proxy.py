@@ -9,117 +9,12 @@ returns the sequence of ``Proxy`` (or ``None`` for DIRECT) to try, in order.
 
 from __future__ import annotations
 
-import re
 import typing
-from enum import Enum
-from typing import Iterable, NamedTuple, Optional, Protocol, Sequence, Union, runtime_checkable
-from urllib.parse import urlsplit
+from typing import Iterable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-from . import netutils
-
-ALPHA = r"A-Za-z"
-DIGIT = r"0-9"
-SCHEME = rf"[{ALPHA}][{ALPHA}{DIGIT}+-.]*"
-PORT = rf"[{DIGIT}]*"
-NON_BREAKING = rf"[^:@/;]"
-AUTHORITY = (
-    rf"(?:({NON_BREAKING}*)(?::({NON_BREAKING}*))?@)?({NON_BREAKING}+)(?::({PORT}))?"
-)
-DELIM = r"(?:;|^)\s*"
-
+from ._uri import URL, UriSplit, _URI
 
 __all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap", "ProxyDict"]
-
-
-class UriSplit(Enum):
-    """Regexes for splitting either a plain URI or a PAC ``PROXY ...; ...`` string."""
-
-    Default = re.compile(rf"{DELIM}(?:(?:({SCHEME}):)?(?://{AUTHORITY})?\s*)")
-    PAC = re.compile(rf"{DELIM}({SCHEME})(?:\s+(?:{AUTHORITY})?\s*)?")
-
-    def match(self, uri: str):
-        return self.value.match(uri)
-
-    def findall(self, uri: str):
-        return self.value.findall(uri)
-
-
-class _URI(NamedTuple):
-    scheme: str
-    username: str
-    password: str
-    host: str
-    port: Optional[int]
-
-    @property
-    def netloc(self) -> str:
-        if self.port:
-            return f"{self.host}:{self.port}"
-        else:
-            return self.host
-
-    def resolved(self) -> "_URI":
-        """Return a copy with the scheme's conventional port filled in if missing."""
-        if self.port:
-            return self
-        return self.__class__(
-            self.scheme,
-            self.username,
-            self.password,
-            self.host,
-            netutils.get_default_port(self.scheme),
-        )
-
-    def as_uri(self) -> str:
-        authority = self.netloc
-        userinfo = ""
-        if self.username:
-            userinfo = self.username
-            if self.password:
-                userinfo = userinfo + ":" + self.password
-
-        if userinfo:
-            authority = userinfo + "@" + self.netloc
-        if self.scheme:
-            return self.scheme + "://" + authority
-        else:
-            return "//" + authority
-
-    @classmethod
-    def from_str(
-        cls,
-        uri: str,
-        format: UriSplit = UriSplit.Default,
-    ) -> "Optional[_URI]":
-        if not uri:
-            return None
-        match = format.match(uri)
-        if not match or not any(match.groups()):
-            # A bare hostname like "example.com" technically "matches" with
-            # every group empty -- reject it clearly instead of building a
-            # URI of Nones that crashes later.
-            raise ValueError(f"Could not parse {uri!r} as a {format.name} URI")
-        return cls(*match.groups())
-
-    @classmethod
-    def find_all(cls, uris: str, format: UriSplit = UriSplit.Default) -> "list[_URI]":
-        return [cls(*uri) for uri in format.findall(uris)] if uris else []
-
-
-class URL(_URI):
-    _DEFAULT_SCHEME = "http"
-
-    def __new__(
-        cls, scheme: str, username: str, password: str, host: str, port: "str|int|None"
-    ) -> "URL":
-        scheme = (scheme or "").lower()
-        if not scheme:
-            scheme = cls._DEFAULT_SCHEME
-
-        if port:
-            port = int(port)
-
-        return super().__new__(cls, scheme, username, password, host, port)
 
 
 class Proxy(_URI):
@@ -168,6 +63,22 @@ class ProxyMap(Protocol):
     Calling ``ProxyMap(src)`` is a small factory: a plain proxy-authority
     string builds a ``SimpleProxyMap``, but a string that looks like a URL to
     a PAC file/script is loaded as one (see :mod:`proxylib.pac`).
+
+    **Result contract** (every implementation must follow this so chaining
+    multiple maps together is meaningful):
+
+    - ``__getitem__`` **raises** ``KeyError`` to mean *no decision* -- this
+      map has no opinion on the request, distinct from an explicit answer.
+      A fallback/chain should try the next map.
+    - ``__getitem__`` **yields** ``None`` as an entry to mean *DIRECT* (no
+      proxy) -- an explicit, definitive answer, not "no opinion".
+    - ``__getitem__`` **yields** a ``Proxy`` entry to mean *use this proxy*.
+
+    Per-implementation notes: ``SimpleProxyMap`` and ``pac.PAC`` are always
+    definitive (constructed with, or computed, an explicit answer) and never
+    raise ``KeyError``. ``EnvProxyConfig`` raises ``KeyError`` for a scheme
+    with no configured env proxy (env vars can't express "explicitly
+    DIRECT", only "set" or "absent").
     """
 
     def __new__(cls, *args, **kwargs):

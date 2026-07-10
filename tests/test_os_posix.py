@@ -4,8 +4,23 @@ import pytest
 
 from proxylib import Proxy
 from proxylib.env import EnvProxyConfig
+from proxylib.os.posix import _which
+from proxylib.os.posix._gsettings import clear_gsettings_cache
 from proxylib.pac import PAC
 from proxylib.proxy import SimpleProxyMap
+
+
+@pytest.fixture(autouse=True)
+def clear_posix_caches():
+    # _which.which() and _gsettings_get()'s batching are both clearable
+    # module-level caches -- must be reset between tests or a fake shutil.which
+    # / gsettings response from one test leaks into the next (same class of
+    # bug the wpad._cache/get_local_interfaces caches already guard against).
+    _which.clear_which_cache()
+    clear_gsettings_cache()
+    yield
+    _which.clear_which_cache()
+    clear_gsettings_cache()
 
 
 def _fake_gsettings(values):
@@ -84,6 +99,87 @@ def test_posix_system_proxy_backend_order_gnome_before_mate(monkeypatch):
 
     result = posix.system_proxy()
     assert list(result["http://example.com"]) == [Proxy.from_str("http://gnome-proxy:80")]
+
+
+# ---- gsettings batching (list-recursively) ------------------------------------
+
+
+def test_gsettings_batches_into_one_call_when_children_included(monkeypatch):
+    import proxylib.os.posix._gsettings as gsettings
+
+    monkeypatch.setattr(gsettings._which, "which", lambda name: "/usr/bin/gsettings")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class Result:
+            stdout = (
+                "org.gnome.system.proxy mode 'manual'\n"
+                "org.gnome.system.proxy ignore-hosts ['localhost', '*.internal']\n"
+                "org.gnome.system.proxy.http host 'proxy.example.com'\n"
+                "org.gnome.system.proxy.http port 8080\n"
+            )
+
+        return Result()
+
+    monkeypatch.setattr(gsettings.subprocess, "run", fake_run)
+
+    assert gsettings._gsettings_get("org.gnome.system.proxy", "mode") == "manual"
+    assert gsettings._gsettings_get("org.gnome.system.proxy.http", "host") == "proxy.example.com"
+    assert gsettings._gsettings_get("org.gnome.system.proxy.http", "port") == "8080"
+    # One recursive call covers base schema + child, cached across all three lookups.
+    assert len(calls) == 1
+    assert calls[0][1:] == ["list-recursively", "org.gnome.system.proxy"]
+
+
+def test_gsettings_falls_back_to_per_schema_call_when_children_missing(monkeypatch):
+    import proxylib.os.posix._gsettings as gsettings
+
+    monkeypatch.setattr(gsettings._which, "which", lambda name: "/usr/bin/gsettings")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class Result:
+            pass
+
+        result = Result()
+        if cmd[-1] == "org.gnome.system.proxy":
+            result.stdout = "org.gnome.system.proxy mode 'manual'\n"
+        else:
+            result.stdout = "org.gnome.system.proxy.http host 'proxy.example.com'\n"
+        return result
+
+    monkeypatch.setattr(gsettings.subprocess, "run", fake_run)
+
+    assert gsettings._gsettings_get("org.gnome.system.proxy", "mode") == "manual"
+    assert gsettings._gsettings_get("org.gnome.system.proxy.http", "host") == "proxy.example.com"
+    # Base call didn't include the child schema -> one extra fallback call.
+    assert len(calls) == 2
+    assert calls[1][1:] == ["list-recursively", "org.gnome.system.proxy.http"]
+
+
+def test_gsettings_returns_none_when_binary_missing(monkeypatch):
+    import proxylib.os.posix._gsettings as gsettings
+
+    monkeypatch.setattr(gsettings._which, "which", lambda name: None)
+    assert gsettings._gsettings_get("org.gnome.system.proxy", "mode") is None
+
+
+def test_which_cache_dedups_repeated_lookups(monkeypatch):
+    calls = []
+
+    def fake_which(name):
+        calls.append(name)
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr(_which, "shutil", type("S", (), {"which": staticmethod(fake_which)}))
+
+    assert _which.which("gsettings") == "/usr/bin/gsettings"
+    assert _which.which("gsettings") == "/usr/bin/gsettings"
+    assert calls == ["gsettings"]
 
 
 # ---- GNOME / MATE (gsettings) -------------------------------------------------

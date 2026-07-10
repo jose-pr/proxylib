@@ -28,10 +28,17 @@ def test_proxydict_copy():
 def test_requests_proxies_alias_is_gone():
     # Removed ahead of 1.0.0 -- ProxyDict is the only name for this now.
     import proxylib
-    import proxylib.requests
+    import proxylib.integrations.requests
 
     assert not hasattr(proxylib, "RequestsProxies")
-    assert not hasattr(proxylib.requests, "RequestsProxies")
+    assert not hasattr(proxylib.integrations.requests, "RequestsProxies")
+
+
+def test_old_proxylib_requests_module_path_is_gone():
+    # proxylib.requests moved to proxylib.integrations.requests pre-1.0; no
+    # shim is kept at the old path (explicitly accepted breaking change).
+    with pytest.raises(ModuleNotFoundError):
+        import proxylib.requests  # noqa: F401
 
 
 @pytest.fixture

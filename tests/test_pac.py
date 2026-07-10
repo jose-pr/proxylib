@@ -22,6 +22,20 @@ def test_pac_localHostOrDomainIs():
     assert not pac.localHostOrDomainIs("other", "host.example.com")
 
 
+def test_pac_localHostOrDomainIs_rejects_partial_prefix():
+    # Regression: a naive `hostdom.startswith(host)` check would wrongly
+    # match "ww" against "www.example.com" -- the host part must match
+    # exactly, not just be a string prefix.
+    assert not pac.localHostOrDomainIs("ww", "www.example.com")
+
+
+def test_pac_dnsDomainLevels():
+    # Spec: number of dots, not split-length (sub.example.com has 2 dots).
+    assert pac.dnsDomainLevels("sub.example.com") == 2
+    assert pac.dnsDomainLevels("example.com") == 1
+    assert pac.dnsDomainLevels("localhost") == 0
+
+
 def test_pac_shExpMatch():
     assert pac.shExpMatch("www.example.com", "*.example.com")
     assert not pac.shExpMatch("www.example.org", "*.example.com")

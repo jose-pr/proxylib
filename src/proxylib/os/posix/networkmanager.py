@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 from ...pac.wpad import discover as _wpad_discover
 from ...proxy import ProxyMap
+from . import _which
 
 __all__ = ("detect",)
 
@@ -28,7 +29,7 @@ __all__ = ("detect",)
 # ---- nmcli ------------------------------------------------------------------
 
 def _nmcli_get(*args: str) -> "List[str]":
-    nmcli = shutil.which("nmcli")
+    nmcli = _which.which("nmcli")
     if not nmcli:
         return []
     try:
@@ -45,7 +46,7 @@ def _nmcli_get(*args: str) -> "List[str]":
 
 
 def _proxy_settings_via_nmcli() -> "Optional[Dict[str, str]]":
-    if not shutil.which("nmcli"):
+    if not _which.which("nmcli"):
         return None
     active_uuids = [u.strip() for u in _nmcli_get("UUID", "connection", "show", "--active") if u.strip()]
     if not active_uuids:
@@ -73,7 +74,7 @@ _NM_DEST = "org.freedesktop.NetworkManager"
 
 
 def _dbus_send(*args: str) -> "Optional[str]":
-    dbus_send = shutil.which("dbus-send")
+    dbus_send = _which.which("dbus-send")
     if not dbus_send:
         return None
     try:
@@ -123,7 +124,7 @@ def _proxy_group_values(get_settings_reply: str) -> "Dict[str, str]":
 
 
 def _proxy_settings_via_dbus_send() -> "Optional[Dict[str, str]]":
-    if not shutil.which("dbus-send"):
+    if not _which.which("dbus-send"):
         return None
 
     active_reply = _dbus_send(

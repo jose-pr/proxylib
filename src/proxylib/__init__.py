@@ -2,6 +2,8 @@
 evaluation (with WPAD discovery), and Transport Adapters for ``requests``/``urllib``."""
 
 from .env import EnvProxyConfig as EnvProxyConfig
+from .env import get_default_no_proxy as get_default_no_proxy
+from .env import set_default_no_proxy as set_default_no_proxy
 from .netutils import first_working_proxy as first_working_proxy
 from .os import auto_proxy, system_proxy
 from .os.posix.libproxy import LibProxyMap as LibProxyMap
@@ -10,8 +12,8 @@ from .pac import JSProxyAutoConfig as JSProxyAutoConfig
 from .pac import load as load_pac
 from .pac.wpad import discover as discover_pac
 from .proxy import *
-from .requests import ProxyMapAdapter as ProxyMapAdapter
-from .urllib import ProxyMapHandler as ProxyMapHandler
+from .integrations.requests import ProxyMapAdapter as ProxyMapAdapter
+from .integrations.urllib import ProxyMapHandler as ProxyMapHandler
 
 
 def __getattr__(name: str):

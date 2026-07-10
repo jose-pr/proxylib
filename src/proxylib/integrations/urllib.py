@@ -3,9 +3,10 @@
 ``ProxyMapHandler`` resolves the proxy per-request from a ``ProxyMap``,
 rather than a static ``{scheme: proxy_url}`` dict like the stdlib
 ``urllib.request.ProxyHandler`` normally uses -- the same upgrade
-:class:`proxylib.requests.ProxyMapAdapter` is over a plain proxies dict, and
-for the same reason: a static dict can't see the request's host/path, which
-most ``ProxyMap`` rules (PAC scripts, path-dependent NO_PROXY) need.
+:class:`proxylib.integrations.requests.ProxyMapAdapter` is over a plain
+proxies dict, and for the same reason: a static dict can't see the request's
+host/path, which most ``ProxyMap`` rules (PAC scripts, path-dependent
+NO_PROXY) need.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import urllib.request
 from typing import Any
 
-from .proxy import ProxyMap
+from ..proxy import ProxyMap
 
 __all__ = ("ProxyMapHandler",)
 

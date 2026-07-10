@@ -1,0 +1,70 @@
+name: Test
+
+# On-demand / ad-hoc test workflow, separate from release.yaml's release-gate
+# test job. Two ways to run it:
+#   - workflow_dispatch (optionally against a specific ref), for manual runs.
+#   - push of a tag matching "ci-*" (throwaway tag, delete after) so an agent
+#     without dashboard access can trigger + poll a run via the API/CLI.
+# Never triggered by push/PR on branches -- this repo deliberately doesn't run
+# CI on every commit (see root AGENTS.md).
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "ci-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install proxylib with all extras
+        run: python -m pip install -e ".[dev,jspac,ifaddr,requests]"
+
+      # GNOME/MATE proxy detection (Phase 3) is only exercisable against a
+      # real gsettings/dconf + dbus session, not just monkeypatched seams.
+      - name: Install desktop proxy tooling (gsettings/dbus)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gsettings-desktop-schemas dbus-x11
+
+      # Diagnostic only (not a test assertion): Phase 3's gsettings-batching
+      # plan needs to know whether org.gnome.system.proxy's child schemas
+      # (.http, .https) are included in a recursive listing. Surface it in
+      # the run log so that question can be answered from a real CI machine.
+      - name: Probe gsettings recursive schema listing (diagnostic)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dbus-run-session -- gsettings list-recursively org.gnome.system.proxy || true
+
+      - name: Run tests (dbus session)
+        if: matrix.os == 'ubuntu-latest'
+        run: dbus-run-session -- python -m pytest -q
+
+      - name: Run tests
+        if: matrix.os != 'ubuntu-latest'
+        run: python -m pytest -q

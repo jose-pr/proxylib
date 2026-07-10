@@ -6,6 +6,13 @@ from proxylib import netutils
 from proxylib.proxy import Proxy, UriSplit
 
 
+@pytest.fixture(autouse=True)
+def clear_interfaces_cache():
+    netutils.clear_interfaces_cache()
+    yield
+    netutils.clear_interfaces_cache()
+
+
 def test_get_ip_from_literal():
     ip = netutils.get_ip("127.0.0.1")
     assert ip == ipaddress.ip_address("127.0.0.1")
@@ -37,6 +44,36 @@ def test_get_local_interfaces_returns_something():
         isinstance(i, (ipaddress.IPv4Interface, ipaddress.IPv6Interface))
         for i in interfaces
     )
+
+
+def test_get_local_interfaces_caches_within_ttl(monkeypatch):
+    calls = []
+
+    def fake_enumerate():
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(netutils, "_enumerate_interfaces", fake_enumerate)
+
+    netutils.get_local_interfaces()
+    netutils.get_local_interfaces()
+
+    assert len(calls) == 1
+
+
+def test_get_local_interfaces_cache_ttl_zero_bypasses_cache(monkeypatch):
+    calls = []
+
+    def fake_enumerate():
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(netutils, "_enumerate_interfaces", fake_enumerate)
+
+    netutils.get_local_interfaces(cache_ttl=0)
+    netutils.get_local_interfaces(cache_ttl=0)
+
+    assert len(calls) == 2
 
 
 class _FakeConnections:

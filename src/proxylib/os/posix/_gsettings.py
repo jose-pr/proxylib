@@ -5,31 +5,94 @@ GNOME 2's), only the schema id differs.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
+from typing import Dict, Tuple
 
 from ...env import EnvProxyConfig
 from ...pac.wpad import discover as _wpad_discover
 from ...proxy import ProxyMap
+from . import _which
 
 __all__ = ("read_desktop_proxy",)
 
+# schema -> {(schema_or_child, key): raw value}, memoized per base schema for
+# the process lifetime. clear_gsettings_cache() is the seam tests use.
+_recursive_cache: "Dict[str, Dict[Tuple[str, str], str]]" = {}
+
+
+def clear_gsettings_cache() -> None:
+    _recursive_cache.clear()
+
+
+def _base_schema(schema: str) -> str:
+    """Strip a ``.http``/``.https`` child-schema suffix, e.g. for
+    ``org.gnome.system.proxy.http`` -> ``org.gnome.system.proxy``."""
+    for suffix in (".https", ".http"):
+        if schema.endswith(suffix):
+            return schema[: -len(suffix)]
+    return schema
+
+
+def _parse_gsettings_recursive(output: str) -> "Dict[Tuple[str, str], str]":
+    """Parse ``gsettings list-recursively <schema>`` output.
+
+    Each line is ``<schema> <key> <GVariant-formatted value>`` -- split on
+    the first two whitespace runs only, since the value itself can contain
+    spaces (list literals, quoted strings). Values are normalized the same
+    way the old single-key ``gsettings get`` path was (``strip("'")``);
+    callers that need to parse a list/bool literal do so themselves, same
+    as before batching.
+    """
+    values: "Dict[Tuple[str, str], str]" = {}
+    for line in output.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        schema, key, value = parts
+        values[(schema, key)] = value.strip().strip("'")
+    return values
+
+
+def _gsettings_list_recursively(schema: str) -> "Dict[Tuple[str, str], str]":
+    if schema in _recursive_cache:
+        return _recursive_cache[schema]
+    values: "Dict[Tuple[str, str], str]" = {}
+    gsettings = _which.which("gsettings")
+    if gsettings:
+        try:
+            result = subprocess.run(
+                [gsettings, "list-recursively", schema],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            )
+            values = _parse_gsettings_recursive(result.stdout)
+        except (OSError, subprocess.SubprocessError):
+            values = {}
+    _recursive_cache[schema] = values
+    return values
+
 
 def _gsettings_get(schema: str, key: str) -> "str|None":
-    gsettings = shutil.which("gsettings")
-    if not gsettings:
-        return None
-    try:
-        result = subprocess.run(
-            [gsettings, "get", schema, key],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return result.stdout.strip().strip("'")
+    """Look up one gsettings key, batching reads via ``list-recursively``.
+
+    One recursive call on the base schema (``org.gnome.system.proxy``)
+    covers the whole tree if child schemas (``.http``/``.https``) are
+    included in its recursive listing -- unverified from this dev box, see
+    the Phase 1 CI diagnostic step. If a requested child-schema key isn't
+    present in that result, falls back to one additional recursive call
+    scoped to the child schema itself (worst case 3 calls total instead of
+    up to 7 single-key ``gsettings get`` calls).
+    """
+    base = _base_schema(schema)
+    values = _gsettings_list_recursively(base)
+    if schema != base and (schema, key) not in values:
+        child_values = _gsettings_list_recursively(schema)
+        if child_values:
+            values = {**values, **child_values}
+            _recursive_cache[base] = values
+    return values.get((schema, key))
 
 
 def read_desktop_proxy(schema: str) -> "ProxyMap|str|None":

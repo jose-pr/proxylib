@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import ipaddress as _ip
 import socket as _socket
-from typing import TYPE_CHECKING, Iterable, List, Optional, Union
+import time as _time
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
     # Runtime import would be circular: proxy.py imports this module.
@@ -20,7 +21,7 @@ _Interface = Union[_ip.IPv4Interface, _ip.IPv6Interface]
 try:
     import ifaddr as _ifaddr
 
-    def get_local_interfaces() -> "List[_Interface]":
+    def _enumerate_interfaces() -> "List[_Interface]":
         """Return this host's local network interfaces as ip_interface objects."""
         ips: "List[_Interface]" = []
 
@@ -38,7 +39,7 @@ try:
 
 except ImportError:
 
-    def get_local_interfaces() -> "List[_Interface]":
+    def _enumerate_interfaces() -> "List[_Interface]":
         """Best-effort fallback: resolve all addresses for the local hostname.
 
         Without ``ifaddr`` there is no portable stdlib way to enumerate real
@@ -68,6 +69,36 @@ except ImportError:
             except OSError:
                 pass
         return ips
+
+
+# (monotonic timestamp, result) of the last _enumerate_interfaces() call, or
+# None before the first call. Real interface enumeration (the ifaddr-less
+# getaddrinfo fallback especially) blocks, and <local>-in-NO_PROXY lookups
+# hit it on every request -- cache briefly. clear_interfaces_cache() is the
+# seam tests use to bypass it, same shape as pac.wpad's _cache.
+_interfaces_cache: "Optional[Tuple[float, List[_Interface]]]" = None
+
+
+def get_local_interfaces(cache_ttl: "float|None" = 10.0) -> "List[_Interface]":
+    """Return this host's local network interfaces, cached for ``cache_ttl`` seconds.
+
+    Pass ``cache_ttl=0``/``None`` to force a fresh enumeration.
+    """
+    global _interfaces_cache
+    if cache_ttl:
+        cached = _interfaces_cache
+        if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:
+            return cached[1]
+    result = _enumerate_interfaces()
+    if cache_ttl:
+        _interfaces_cache = (_time.monotonic(), result)
+    return result
+
+
+def clear_interfaces_cache() -> None:
+    """Clear the ``get_local_interfaces`` cache. Call this in tests that monkeypatch enumeration."""
+    global _interfaces_cache
+    _interfaces_cache = None
 
 
 def get_ip(address: str) -> "_ip.IPv4Address|_ip.IPv6Address|None":

@@ -80,7 +80,8 @@ class PAC(object):
 
     @staticmethod
     def dnsDomainLevels(host: str, /) -> int:
-        return len(host.split("."))
+        """Number of dots in ``host`` (the PAC spec's definition), e.g. 2 for ``sub.example.com``."""
+        return host.count(".")
 
     @staticmethod
     def convert_addr(ipaddr: str, /) -> int:
@@ -208,7 +209,14 @@ class PAC(object):
 
     @staticmethod
     def localHostOrDomainIs(host: str, hostdom: str) -> bool:
-        return "." not in host and hostdom.startswith(host) or hostdom == host
+        """True if ``host`` is either the bare hostname or the full host+domain of ``hostdom``.
+
+        Compares the *host part* of ``hostdom`` exactly (not a prefix check)
+        so e.g. ``"ww"`` does not wrongly match ``"www.example.com"``.
+        """
+        if "." not in host:
+            return hostdom.partition(".")[0] == host
+        return hostdom == host
 
     @staticmethod
     def isResolvable(host: str) -> bool:

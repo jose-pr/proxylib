@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   metadata shown on PyPI.
 - PEP 639 `license = "MIT"` / `license-files` metadata (replaces the license
   classifier).
+- `.github/workflows/test.yaml`: on-demand test matrix (workflow_dispatch or a
+  throwaway `ci-*` tag push), separate from the release-gate test job — lets
+  platform-specific code (GNOME/gsettings, macOS) be validated on real CI.
+- `NO_PROXY` entries now accept CIDR notation (`10.0.0.0/8`, `2001:db8::/32`),
+  matched against IP-literal request hosts.
+- `proxylib.set_default_no_proxy()` / `get_default_no_proxy()`: process-wide
+  default `NO_PROXY` rules, merged into every `EnvProxyConfig`.
 
 ### Changed
 
@@ -35,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   happens when a `NO_PROXY` `<local>` entry actually needs it.
 - libproxy's shared library is now located lazily on first use instead of at
   `import proxylib` time.
+- `proxylib.requests`/`proxylib.urllib` moved to
+  `proxylib.integrations.requests`/`proxylib.integrations.urllib` — no shim
+  kept at the old module paths (pre-1.0 breaking change; top-level
+  `from proxylib import ProxyMapAdapter, ProxyMapHandler` is unaffected).
+- `EnvProxyConfig` now raises `KeyError` (instead of returning DIRECT) for a
+  scheme with no configured env proxy, so a future `ChainProxyMap` can fall
+  through to the next map instead of env "winning" by default.
+- `get_local_interfaces()` results are now cached for 10s (`cache_ttl=`
+  param) — interface enumeration blocks, and `<local>`-in-`NO_PROXY` lookups
+  call it per request.
 
 ### Removed
 
@@ -55,6 +72,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `JSContextMeta` compared the first *character* of attribute names against
   `_JSCONTEXT_EXCLUDE` instead of the name itself (dormant — the exclude list
   was unused).
+- `PAC.dnsDomainLevels` counted split-length instead of dots (`sub.example.com`
+  wrongly returned 3 instead of 2, per the PAC spec's own definition).
+- `PAC.localHostOrDomainIs` used a string-prefix check (`hostdom.startswith(host)`),
+  so e.g. `"ww"` wrongly matched `"www.example.com"`; now compares the exact
+  host part.
 
 ## [1.0.0-rc.1] - 2026-07-09
 

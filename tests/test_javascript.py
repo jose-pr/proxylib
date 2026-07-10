@@ -55,7 +55,7 @@ def test_jsproxyautoconfig_dns_domain_levels_and_convert_addr_and_local_host():
     # happen to exercise -- confirm they're at least callable from real JS.
     js = """
     function FindProxyForURL(url, host) {
-        if (dnsDomainLevels(host) !== 3) {
+        if (dnsDomainLevels(host) !== 2) {
             return "PROXY wrong-levels.example.com:8080";
         }
         if (convert_addr("0.0.0.1") !== 1) {

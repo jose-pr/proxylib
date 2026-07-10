@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .proxy import ProxyMap
+from ..proxy import ProxyMap
 
 __all__ = ("ProxyMapAdapter",)
 

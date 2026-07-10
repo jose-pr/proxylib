@@ -1,5 +1,5 @@
 # requests / urllib integrations
 
-::: proxylib.requests
+::: proxylib.integrations.requests
 
-::: proxylib.urllib
+::: proxylib.integrations.urllib
