@@ -12,8 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `ProxyDict` (in `proxylib.proxy`): the plain proxies-dict integration,
   renamed and moved out of the `requests` module since it never actually
   depended on requests — usable with anything that accepts a
-  `{scheme: proxy_uri}` mapping. `RequestsProxies` remains as a
-  backward-compatible alias.
+  `{scheme: proxy_uri}` mapping.
 - `first_working_proxy()` (in `proxylib.netutils`): failover helper that
   probes a `ProxyMap` result (`PROXY a; PROXY b; DIRECT`) in order and
   returns the first entry that accepts a TCP connection.
@@ -36,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   happens when a `NO_PROXY` `<local>` entry actually needs it.
 - libproxy's shared library is now located lazily on first use instead of at
   `import proxylib` time.
+
+### Removed
+
+- `RequestsProxies` — renamed to `ProxyDict` (see Added); the old name is
+  gone. Only ever published under a release candidate (`1.0.0-rc.1`), so no
+  stable release carried it.
 
 ### Fixed
 

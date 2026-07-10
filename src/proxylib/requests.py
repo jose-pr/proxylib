@@ -4,21 +4,16 @@
 the recommended way to wire a ``ProxyMap`` into a ``requests.Session`` — it
 hooks ``HTTPAdapter.send()``, so it sees the real request URL. For the
 simpler proxies-dict style (``requests.get(url, proxies=...)``) use
-:class:`proxylib.proxy.ProxyDict`, which isn't requests-specific;
-``RequestsProxies`` remains as its backward-compatible alias.
+:class:`proxylib.proxy.ProxyDict`, which isn't requests-specific.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .proxy import ProxyDict, ProxyMap
+from .proxy import ProxyMap
 
-__all__ = ("RequestsProxies", "ProxyMapAdapter")
-
-# Backward-compatible alias: this class predates the rename to the
-# library-agnostic ProxyDict (it never actually depended on requests).
-RequestsProxies = ProxyDict
+__all__ = ("ProxyMapAdapter",)
 
 
 try:

@@ -1,34 +1,37 @@
 import pytest
 
-from proxylib import Proxy, ProxyMapAdapter, RequestsProxies, SimpleProxyMap
+from proxylib import Proxy, ProxyDict, ProxyMapAdapter, SimpleProxyMap
 
 requests = pytest.importorskip("requests")
 
 
-def test_requests_proxies_is_alias_of_proxydict():
-    from proxylib import ProxyDict
-
-    assert RequestsProxies is ProxyDict
-
-
-def test_requests_proxies_returns_uri_for_proxy():
+def test_proxydict_returns_uri_for_proxy():
     proxymap = SimpleProxyMap(Proxy.from_str("http://proxy:8080"))
-    rp = RequestsProxies(proxymap)
-    assert rp["http://example.com"] == "http://proxy:8080"
+    pd = ProxyDict(proxymap)
+    assert pd["http://example.com"] == "http://proxy:8080"
 
 
-def test_requests_proxies_raises_keyerror_for_direct():
-    rp = RequestsProxies(SimpleProxyMap("DIRECT"))
+def test_proxydict_raises_keyerror_for_direct():
+    pd = ProxyDict(SimpleProxyMap("DIRECT"))
     with pytest.raises(KeyError):
-        rp["http://example.com"]
+        pd["http://example.com"]
 
 
-def test_requests_proxies_copy():
+def test_proxydict_copy():
     proxymap = SimpleProxyMap(Proxy.from_str("http://proxy:8080"))
-    rp = RequestsProxies(proxymap)
-    copy = rp.copy()
-    assert copy is not rp
+    pd = ProxyDict(proxymap)
+    copy = pd.copy()
+    assert copy is not pd
     assert copy.proxymap is proxymap
+
+
+def test_requests_proxies_alias_is_gone():
+    # Removed ahead of 1.0.0 -- ProxyDict is the only name for this now.
+    import proxylib
+    import proxylib.requests
+
+    assert not hasattr(proxylib, "RequestsProxies")
+    assert not hasattr(proxylib.requests, "RequestsProxies")
 
 
 @pytest.fixture

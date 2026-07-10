@@ -147,7 +147,7 @@ like a PAC file/URL is loaded with `load_pac`.
 | `proxylib.pac` | `PAC`, `JSProxyAutoConfig`, `load()` — PAC utility functions + evaluation |
 | `proxylib.pac.wpad` | `discover()` — DNS+HTTP WPAD auto-discovery |
 | `proxylib.pac.javascript` | `JSContext` — the `dukpy`-backed JS execution engine |
-| `proxylib.requests` | `ProxyMapAdapter` (recommended); `RequestsProxies` is a back-compat alias of `ProxyDict` |
+| `proxylib.requests` | `ProxyMapAdapter` — the recommended `requests` integration |
 | `proxylib.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
 | `proxylib.netutils` | `get_ip`, `get_default_port`, `get_local_interfaces`, `first_working_proxy` |
 

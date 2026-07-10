@@ -11,7 +11,6 @@ from .pac import load as load_pac
 from .pac.wpad import discover as discover_pac
 from .proxy import *
 from .requests import ProxyMapAdapter as ProxyMapAdapter
-from .requests import RequestsProxies
 from .urllib import ProxyMapHandler as ProxyMapHandler
 
 
