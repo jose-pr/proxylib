@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-11
+
 ### Added
 
 - `ProxyDict` (in `proxylib.proxy`): the plain proxies-dict integration,
@@ -236,5 +238,6 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jose-pr/proxylib/releases/tag/v1.0.0
 [1.0.0-rc.1]: https://github.com/jose-pr/proxylib/releases/tag/v1.0.0-rc.1
