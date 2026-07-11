@@ -8,3 +8,6 @@ __pycache__
 /.venv
 /site
 AGENTS.md
+.agents
+CLAUDE*
+.claude
