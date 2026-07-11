@@ -67,10 +67,6 @@ Optional extras:
 | `proxylib[quickjs]` | `quickjs` | The `quickjs` JS engine specifically (no dependency on `dukpy`) |
 | `proxylib[ifaddr]` | `ifaddr` | Accurate local network interface/prefix enumeration (used by `NO_PROXY <local>`) |
 
-`requests` itself is *not* a proxylib extra — `ProxyMapAdapter`/`ProxyDict` work
-whenever `requests` happens to already be installed (guarded, not required); there's
-nothing an extra needs to add over `pip install requests`.
-
 Without a JS engine installed, PAC files are still fetched and validated, but evaluate
 to `DIRECT` (with a warning) since there's no engine to run them. With more than one
 installed, `PROXYLIB_JS_ENGINE=dukpy` (or `quickjs`, or a comma-separated priority list)
