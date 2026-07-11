@@ -46,9 +46,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `gsettings list-recursively` call instead of up to 7 single-key
   `gsettings get` calls; `shutil.which` lookups for `gsettings`/`nmcli`/
   `dbus-send` are now cached (clearable, for tests).
+- `pac.load()` now caches genuine network downloads (not `file:`/inline-JS
+  sources) for 5 minutes by default (`cache_ttl=` param).
+- `PAC.dnsResolve` results are now cached for 30 seconds by default
+  (`cache_ttl=` param) — real-world PAC scripts often call it repeatedly for
+  the same host.
+- Pluggable PAC JS engines (`proxylib.pac.engines`): `JSProxyAutoConfig`/
+  `JSContext` now run against a small `JSEngine` interface instead of
+  `dukpy` directly. New optional `quickjs` backend (`proxylib[quickjs]`
+  extra) alongside the existing `dukpy` one (`proxylib[jspac]`). Select
+  with the `PROXYLIB_JS_ENGINE` env var (comma-separated priority list,
+  e.g. `PROXYLIB_JS_ENGINE=quickjs,dukpy`); defaults to preferring `dukpy`.
 
 ### Changed
 
+- `pac.load()`/WPAD fetches now go through an explicit no-proxy opener
+  instead of the default (env-var-honoring) one — fetching a PAC/WPAD
+  script must never itself be routed through a configured proxy.
 - `PAC` lookups now pass the **full request URL** (path and query included) to
   `FindProxyForURL`, per the PAC spec, instead of truncating to
   `scheme://netloc` — PAC scripts with path-based rules now work.
@@ -56,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   happens when a `NO_PROXY` `<local>` entry actually needs it.
 - libproxy's shared library is now located lazily on first use instead of at
   `import proxylib` time.
+- `JSContext`-exported callables (`JSProxyAutoConfig`'s Python-backed PAC
+  utility functions) are now pre-bound once at construction instead of a
+  fresh closure allocated on every attribute access.
 - `proxylib.requests`/`proxylib.urllib` moved to
   `proxylib.integrations.requests`/`proxylib.integrations.urllib` — no shim
   kept at the old module paths (pre-1.0 breaking change; top-level

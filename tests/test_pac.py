@@ -1,9 +1,20 @@
 import datetime
 
+import pytest
+
 from proxylib import PAC, Proxy, load_pac
 
 pac = PAC()
 _WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
+
+
+@pytest.fixture(autouse=True)
+def clear_dns_cache():
+    import proxylib.pac as pac_module
+
+    pac_module.clear_dns_cache()
+    yield
+    pac_module.clear_dns_cache()
 
 
 def test_pac_isPlainHostname():
@@ -106,6 +117,181 @@ def test_pac_findproxyforurl_receives_full_url():
     Spy()["https://example.com/some/path?q=1"]
     assert seen["url"] == "https://example.com/some/path?q=1"
     assert seen["host"] == "example.com"
+
+
+def test_findproxyforurl_receives_lowercased_host():
+    # Regression only (already correct, via urlparse(url).hostname): a
+    # mixed-case host in the request URL must reach FindProxyForURL
+    # lowercased, matching PAC scripts' usual assumption.
+    seen = {}
+
+    class Spy(PAC):
+        @staticmethod
+        def FindProxyForURL(url, host, /):
+            seen["host"] = host
+            return "DIRECT"
+
+    Spy()["https://EXAMPLE.Com/path"]
+    assert seen["host"] == "example.com"
+
+
+def test_load_caches_network_downloads(monkeypatch):
+    import proxylib.pac as pac
+
+    pac.clear_download_cache()
+    calls = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"function FindProxyForURL(url, host) { return 'DIRECT'; }"
+
+    def fake_urlopen(url, **kwargs):
+        calls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr(pac, "_urlopen", fake_urlopen)
+
+    pac.load("http://internal/proxy.pac")
+    pac.load("http://internal/proxy.pac")
+
+    assert len(calls) == 1
+
+
+def test_load_cache_ttl_zero_bypasses_cache(monkeypatch):
+    import proxylib.pac as pac
+
+    pac.clear_download_cache()
+    calls = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"function FindProxyForURL(url, host) { return 'DIRECT'; }"
+
+    def fake_urlopen(url, **kwargs):
+        calls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr(pac, "_urlopen", fake_urlopen)
+
+    pac.load("http://internal/proxy.pac", cache_ttl=0)
+    pac.load("http://internal/proxy.pac", cache_ttl=0)
+
+    assert len(calls) == 2
+
+
+def test_load_does_not_cache_file_or_inline_sources(monkeypatch):
+    import proxylib.pac as pac
+
+    pac.clear_download_cache()
+
+    def boom(url, **kwargs):
+        raise AssertionError("file:/inline-JS sources must never hit _urlopen")
+
+    monkeypatch.setattr(pac, "_urlopen", boom)
+
+    pac.load("file:examples/example.pac")
+    pac.load("function FindProxyForURL(url, host) { return 'DIRECT'; }")
+    assert pac._download_cache == {}
+
+
+def test_load_urlopen_bypasses_env_proxy(monkeypatch):
+    # PAC/WPAD fetches must bypass configured HTTP(S) proxies (see the
+    # module comment) -- if they didn't, ProxyHandler.proxy_open() would
+    # rewrite the request's host to the (bogus) configured proxy before it
+    # ever reaches the HTTP handler that actually opens the connection.
+    import urllib.request
+
+    import proxylib.pac as pac
+
+    monkeypatch.setenv("HTTP_PROXY", "http://bogus-proxy-should-not-be-used:9999")
+    captured = {}
+
+    class FakeResponse:
+        code = 200
+        msg = "OK"
+
+        def info(self):
+            return {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b""
+
+    def fake_do_open(self, http_class, req, **kwargs):
+        captured["host"] = req.host
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request.AbstractHTTPHandler, "do_open", fake_do_open)
+
+    pac._urlopen("http://real-target.example/pac.js")
+    assert captured["host"] == "real-target.example"
+
+
+def test_dns_resolve_caches_within_ttl(monkeypatch):
+    import proxylib.pac as pac_module
+
+    calls = []
+
+    def fake_get_ip(host):
+        calls.append(host)
+        import ipaddress
+
+        return ipaddress.ip_address("1.2.3.4")
+
+    monkeypatch.setattr(pac_module, "get_ip", fake_get_ip)
+
+    assert pac_module.PAC.dnsResolve("example.com") == "1.2.3.4"
+    assert pac_module.PAC.dnsResolve("example.com") == "1.2.3.4"
+    assert calls == ["example.com"]
+
+
+def test_dns_resolve_cache_ttl_zero_bypasses_cache(monkeypatch):
+    import proxylib.pac as pac_module
+
+    calls = []
+
+    def fake_get_ip(host):
+        calls.append(host)
+        return None
+
+    monkeypatch.setattr(pac_module, "get_ip", fake_get_ip)
+
+    pac_module.PAC.dnsResolve("example.com", cache_ttl=0)
+    pac_module.PAC.dnsResolve("example.com", cache_ttl=0)
+    assert calls == ["example.com", "example.com"]
+
+
+def test_dns_resolve_caches_negative_results(monkeypatch):
+    import proxylib.pac as pac_module
+
+    calls = []
+
+    def fake_get_ip(host):
+        calls.append(host)
+        return None
+
+    monkeypatch.setattr(pac_module, "get_ip", fake_get_ip)
+
+    assert pac_module.PAC.dnsResolve("nowhere.invalid") is None
+    assert pac_module.PAC.dnsResolve("nowhere.invalid") is None
+    assert calls == ["nowhere.invalid"]
 
 
 def test_example_pac_file():

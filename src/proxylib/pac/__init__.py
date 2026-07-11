@@ -9,15 +9,19 @@ from __future__ import annotations
 import datetime as _datetime
 import ipaddress as _ip
 import socket as _socket
+import time as _time
 from fnmatch import fnmatch as _shexpmatch
 from pathlib import Path
+from typing import Dict as _Dict
 from typing import Iterable as _Iter
 from typing import Literal as _Literal
 from typing import Optional as _Optional
+from typing import Tuple as _Tuple
 from typing import cast as _cast
 from typing import overload as _overload
 from urllib.parse import urlparse
-from urllib.request import urlopen as _urlopen
+from urllib.request import ProxyHandler as _ProxyHandler
+from urllib.request import build_opener as _build_opener
 from warnings import warn as _warn
 
 from ..netutils import get_ip
@@ -32,7 +36,29 @@ _MONTHS = (
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 )
 
-__all__ = ("PAC", "load")
+__all__ = ("PAC", "load", "clear_download_cache", "clear_dns_cache")
+
+# Fetching a PAC/WPAD script must never itself go through a configured HTTP
+# proxy -- browsers fetch PAC config bypassing proxy settings for the same
+# chicken-and-egg reason, and it's a hard prerequisite for LocalProxyServer
+# (companion plan), where env vars point at ourselves and a proxied PAC
+# fetch would recurse. ProxyHandler({}) with no entries beats the default
+# opener's env-var-honoring behavior.
+_urlopen = _build_opener(_ProxyHandler({})).open
+
+# (monotonic timestamp, result) per host, for PAC.dnsResolve. Short TTL
+# (~30s): a PAC script commonly calls dnsResolve on the same host many times
+# across a session's FindProxyForURL calls (isInNet(myIpAddress(), ...)-style
+# checks especially). True per-instance/per-__getitem__ scoping would need
+# contextvars since dnsResolve is a staticmethod exported straight into the
+# JS engine (no `self` available, and isInNet calls PAC.dnsResolve(host)
+# unbound too) -- a short module-level TTL is simpler and nearly equivalent.
+# clear_dns_cache() is the seam tests use.
+_dns_cache: "_Dict[str, _Tuple[float, _Optional[str]]]" = {}
+
+
+def clear_dns_cache() -> None:
+    _dns_cache.clear()
 
 
 class PAC(object):
@@ -45,12 +71,21 @@ class PAC(object):
 
     #### UTILITY FUNCTIONS ####
     @staticmethod
-    def dnsResolve(host: str, /) -> "str|None":
-        """Resolve host to a single IPv4/IPv6 address string, or None."""
+    def dnsResolve(host: str, /, cache_ttl: float = 30.0) -> "str|None":
+        """Resolve host to a single IPv4/IPv6 address string, or None.
+
+        Cached per host for ``cache_ttl`` seconds (default 30); pass
+        ``cache_ttl=0``/``None`` to force a fresh resolution.
+        """
+        if cache_ttl:
+            cached = _dns_cache.get(host)
+            if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:
+                return cached[1]
         ip = get_ip(host)
-        if ip:
-            return ip.exploded
-        return None
+        result = ip.exploded if ip else None
+        if cache_ttl:
+            _dns_cache[host] = (_time.monotonic(), result)
+        return result
 
     @staticmethod
     def dnsResolveEx(host: str, /) -> str:
@@ -303,26 +338,51 @@ class PAC(object):
 
 
 try:
+    from .engines import get_engine_class
     from .javascript import JSContext
 
-    class JSProxyAutoConfig(PAC, JSContext):
-        """A PAC whose `FindProxyForURL` (and the utility functions above) run as real JS."""
+    # Importing javascript.py always succeeds now (it no longer imports a
+    # specific engine directly) -- _jspac must instead reflect whether any
+    # engine (dukpy, quickjs, ...) is actually installed.
+    _jspac = get_engine_class() is not None
 
-    _jspac = True
+    if _jspac:
+
+        class JSProxyAutoConfig(PAC, JSContext):
+            """A PAC whose `FindProxyForURL` (and the utility functions above) run as real JS."""
+
+    else:
+        JSProxyAutoConfig = None
 except ImportError:
 
     _jspac = False
     JSProxyAutoConfig = None
 
 
-def load(url: str, **urllib_kwds) -> PAC:
+# (monotonic timestamp, result) per URL, for genuine network downloads only
+# (never for file:/inline-JS sources -- those are free to re-read/re-parse).
+# clear_download_cache() is the seam tests use, same shape as pac.wpad's
+# _cache and netutils' interfaces cache.
+_download_cache: "_Dict[str, _Tuple[float, PAC]]" = {}
+
+
+def clear_download_cache() -> None:
+    _download_cache.clear()
+
+
+def load(url: str, cache_ttl: "float|None" = 300.0, **urllib_kwds) -> PAC:
     """Load a PAC script from a URL, a ``file:`` path, or inline JS source.
 
     Requires the ``dukpy`` extra (``proxylib[jspac]``) to actually execute
     the script; without it, a warning is issued and an always-DIRECT
     :class:`PAC` is returned instead.
+
+    Genuine network downloads (not ``file:`` paths or inline JS) are cached
+    per URL for ``cache_ttl`` seconds (default 5 minutes); pass
+    ``cache_ttl=0``/``None`` to force a fresh fetch.
     """
     js = None
+    from_network = False
     if "FindProxyForURL(" in url:
         js = url
     elif "://" not in url:
@@ -330,7 +390,13 @@ def load(url: str, **urllib_kwds) -> PAC:
             js = Path(url.removeprefix("file:")).read_text()
         else:
             url = "https://" + url
+
     if js is None:
+        from_network = True
+        if cache_ttl:
+            cached = _download_cache.get(url)
+            if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:
+                return cached[1]
         with _urlopen(url, **urllib_kwds) as resp:
             js = _cast(bytes, resp.read()).decode()
 
@@ -338,6 +404,10 @@ def load(url: str, **urllib_kwds) -> PAC:
         raise ValueError(f"No FindProxyForURL found in response from: {url}")
     if not _jspac:
         _warn(f"Cannot load js from: {url} as pac. Install proxylib[jspac]")
-        return PAC()
+        result = PAC()
     else:
-        return JSProxyAutoConfig(js)
+        result = JSProxyAutoConfig(js)
+
+    if from_network and cache_ttl:
+        _download_cache[url] = (_time.monotonic(), result)
+    return result

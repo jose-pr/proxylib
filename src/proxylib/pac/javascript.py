@@ -1,6 +1,7 @@
-"""Runs a PAC script as real JavaScript via ``dukpy``, exposing every
-``PAC`` static/class method (and any subclass adds) into the JS global scope
-so ``FindProxyForURL`` can call them.
+"""Runs a PAC script as real JavaScript via a pluggable engine (``dukpy`` or
+``quickjs`` -- see :mod:`proxylib.pac.engines`), exposing every ``PAC``
+static/class method (and any subclass adds) into the JS global scope so
+``FindProxyForURL`` can call them.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 from abc import ABCMeta
 from typing import Dict, List, OrderedDict, Sequence
 
-from dukpy import JSInterpreter
+from .engines import get_engine_class
 
 __all__ = ["JSContext"]
 
@@ -61,11 +62,23 @@ class JSContextMeta(ABCMeta):
 
 
 class JSContext(metaclass=JSContextMeta):
-    """Base class that boots a ``dukpy`` engine with ``_JSCONTEXT`` exported, then evals ``js``."""
+    """Base class that boots a JS engine with ``_JSCONTEXT`` exported, then evals ``js``.
+
+    The engine itself is pluggable (see :mod:`proxylib.pac.engines`) --
+    this class only depends on the small :class:`~proxylib.pac.engines.base.JSEngine`
+    interface (``export_function``/``eval``/``call``), not on any specific
+    engine's API.
+    """
 
     def __init__(self, js: str) -> None:
         context: dict = object.__getattribute__(self, "_JSCONTEXT")
-        engine = JSInterpreter()
+        engine_cls = get_engine_class()
+        if engine_cls is None:
+            raise ImportError(
+                "No PAC JS engine is installed -- install one of the optional "
+                "extras: proxylib[jspac] (dukpy) or proxylib[quickjs]."
+            )
+        engine = engine_cls()
         for key, val in context.items():
             if isinstance(val, staticmethod):
                 val = val.__func__
@@ -77,20 +90,37 @@ class JSContext(metaclass=JSContextMeta):
                 val = val.__get__(self)
 
             engine.export_function(key, val)
-            _js = f"function {key}(){{ return call_python.apply(null, ['{key}'].concat(Array.prototype.slice.call(arguments))); }}"
-            engine.evaljs(_js)
-        engine.evaljs(js)
+        engine.eval(js)
+
+        # Pre-bind one callable per exported name now, instead of allocating
+        # a fresh closure on every attribute access. Each one still calls
+        # engine.call(key, ...), which resolves `key` fresh in the JS
+        # engine's *global scope* at call time (not at bind time) -- that's
+        # what actually implements "JS override wins": if `js` redefined
+        # `key`, the engine resolves to that redefinition regardless of
+        # when this Python-side wrapper was created. A naive
+        # `object.__setattr__(self, key, jsFunction)` here would never be
+        # reached, though -- __getattribute__ below checks membership in
+        # `context` *before* ever falling through to instance-attribute
+        # lookup, so the bound callables live in their own dict instead.
+        bound: "Dict[str, object]" = {}
+        for key in context:
+
+            def _make_js_function(key=key):
+                def jsFunction(*args):
+                    return engine.call(key, *args)
+
+                return jsFunction
+
+            bound[key] = _make_js_function()
 
         object.__setattr__(self, "_jsengine", engine)
+        object.__setattr__(self, "_bound_js_functions", bound)
 
     def __getattribute__(self, name: str):
-        engine: JSInterpreter = object.__getattribute__(self, "_jsengine")
         context: dict = object.__getattribute__(self, "_JSCONTEXT")
         if name in context:
-
-            def jsFunction(*args):
-                return engine.evaljs(f"{name}.apply(null, dukpy.args)", args=list(args))
-
-            return jsFunction
+            bound: dict = object.__getattribute__(self, "_bound_js_functions")
+            return bound[name]
         else:
             return object.__getattribute__(self, name)
