@@ -31,6 +31,37 @@ def test_jscontext_exported_function_is_prebound_not_reallocated():
     assert instance.compute is instance.compute
 
 
+def test_jscontext_overrides_replaces_python_fallback():
+    # overrides= swaps compute's Python-side implementation, without the
+    # loaded script needing to redefine it in JS.
+    instance = Calculator("var unused = 1;", overrides={"compute": lambda n: n * 10})
+    assert instance.compute(4) == 40
+
+
+def test_jscontext_overrides_does_not_leak_to_other_instances():
+    overridden = Calculator("var unused = 1;", overrides={"compute": lambda n: n * 10})
+    plain = Calculator("var unused = 1;")
+
+    assert overridden.compute(4) == 40
+    assert plain.compute(4) == 5  # unaffected: still the Python fallback (+1)
+
+
+def test_jscontext_js_still_overrides_a_python_override():
+    # JS-in-the-loaded-script still wins over an overrides= callable too --
+    # overrides only replaces the *Python fallback*, same override-wins
+    # semantics as the class's own methods.
+    instance = Calculator(
+        "function compute(n) { return n * 100; }",
+        overrides={"compute": lambda n: n * 10},
+    )
+    assert instance.compute(4) == 400
+
+
+def test_jscontext_overrides_can_add_a_new_exported_name():
+    instance = Calculator("var unused = 1;", overrides={"customHelper": lambda: 99})
+    assert instance.customHelper() == 99
+
+
 # ---- Same JSContext behavior, forced onto the quickjs engine -----------------
 # JSContext is written against the pluggable JSEngine interface, not dukpy
 # specifically -- these confirm that's actually true rather than assumed.

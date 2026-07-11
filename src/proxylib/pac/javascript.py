@@ -7,7 +7,7 @@ static/class method (and any subclass adds) into the JS global scope so
 from __future__ import annotations
 
 from abc import ABCMeta
-from typing import Dict, List, OrderedDict, Sequence
+from typing import Callable, Dict, List, Optional, OrderedDict, Sequence
 
 from .engines import get_engine_class
 
@@ -70,8 +70,23 @@ class JSContext(metaclass=JSContextMeta):
     engine's API.
     """
 
-    def __init__(self, js: str) -> None:
+    def __init__(self, js: str, overrides: "Optional[Dict[str, Callable]]" = None) -> None:
         context: dict = object.__getattribute__(self, "_JSCONTEXT")
+        if overrides:
+            context = dict(context)
+            # Wrapped as staticmethod so the binding loop below treats them
+            # exactly like the class's own PAC utility functions (unwrapped
+            # via val.__func__, no `self` bound) -- overrides are plain
+            # standalone callables (e.g. `lambda host: "10.0.0.1"`), not
+            # instance methods, so val.__get__(self) below would wrongly
+            # bind `self` as an implicit first argument otherwise.
+            context.update({key: staticmethod(fn) for key, fn in overrides.items()})
+            # Stored per-instance, not mutated on the shared class-level
+            # _JSCONTEXT, so overrides from one instance don't leak into
+            # another's -- __getattribute__ below picks this up too, so an
+            # override key that isn't one of the base PAC methods is still
+            # recognized as exported.
+            object.__setattr__(self, "_JSCONTEXT", context)
         engine_cls = get_engine_class()
         if engine_cls is None:
             raise ImportError(

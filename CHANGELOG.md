@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `first_working_proxy()` now has a circuit breaker: a proxy that fails its
   probe is skipped (without re-probing) for 30 seconds by default
   (`circuit_breaker_ttl=`), shared with `ConfigurableProxyMap(probe=True)`.
+- `JSProxyAutoConfig`/`JSContext` accept an `overrides=` dict
+  (`JSProxyAutoConfig(js, overrides={"dnsResolve": fn, ...})`) to replace a
+  PAC utility function's Python-fallback implementation per-instance —
+  simplifies offline/sandboxed testing and DNS mocking. A PAC script that
+  redefines the same name in JS still overrides it, same as any other
+  exported function.
 
 ### Changed
 
