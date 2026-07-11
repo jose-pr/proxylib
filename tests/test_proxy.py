@@ -1,7 +1,15 @@
 import pytest
 
-from proxylib import ChainProxyMap, Proxy, ProxyMap, SimpleProxyMap, UriSplit
+from proxylib import ChainProxyMap, ConfigurableProxyMap, Proxy, ProxyMap, SimpleProxyMap, UriSplit
+from proxylib.env import set_default_no_proxy
 from proxylib.proxy import URL, _URI
+
+
+@pytest.fixture(autouse=True)
+def clear_default_no_proxy():
+    set_default_no_proxy(None)
+    yield
+    set_default_no_proxy(None)
 
 
 def test_pac_direct():
@@ -140,6 +148,184 @@ def test_chain_proxy_map_can_nest():
     inner = ChainProxyMap(_KeyErrorMap())
     outer = ChainProxyMap(inner, SimpleProxyMap(p))
     assert outer["http://example.com"] == (p,)
+
+
+# ---- ConfigurableProxyMap -----------------------------------------------------
+
+
+class _CountingProxyMap:
+    """Records every URL it's asked to resolve; returns a fixed result."""
+
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def __getitem__(self, url):
+        self.calls.append(url)
+        return self.result
+
+
+def test_configurable_proxy_map_passes_through_by_default():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner)
+    assert cpm["http://example.com"] == (p,)
+    assert inner.calls == ["http://example.com"]
+
+
+def test_configurable_proxy_map_caches_within_ttl():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, cache_ttl=60.0)
+
+    cpm["http://example.com"]
+    cpm["http://example.com"]
+
+    assert inner.calls == ["http://example.com"]
+
+
+def test_configurable_proxy_map_cache_ttl_none_bypasses_cache():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner)
+
+    cpm["http://example.com"]
+    cpm["http://example.com"]
+
+    assert inner.calls == ["http://example.com", "http://example.com"]
+
+
+def test_configurable_proxy_map_clear_cache():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, cache_ttl=60.0)
+
+    cpm["http://example.com"]
+    cpm.clear_cache()
+    cpm["http://example.com"]
+
+    assert inner.calls == ["http://example.com", "http://example.com"]
+
+
+def test_configurable_proxy_map_browser_compatibility_strips_https_path():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, browser_compatibility=True)
+
+    cpm["https://example.com/secret/path?query=1"]
+
+    assert inner.calls == ["https://example.com"]
+
+
+def test_configurable_proxy_map_browser_compatibility_leaves_http_alone():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, browser_compatibility=True)
+
+    cpm["http://example.com/some/path"]
+
+    assert inner.calls == ["http://example.com/some/path"]
+
+
+def test_configurable_proxy_map_cache_key_is_the_effective_url():
+    # Two HTTPS URLs differing only in path/query must share one cache entry
+    # once browser_compatibility strips them down to the same effective URL.
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, browser_compatibility=True, cache_ttl=60.0)
+
+    cpm["https://example.com/path/a"]
+    cpm["https://example.com/path/b?x=1"]
+
+    assert inner.calls == ["https://example.com"]
+
+
+def test_configurable_proxy_map_round_robin_rotates_first_choice():
+    p1 = Proxy.from_str("http://p1:80")
+    p2 = Proxy.from_str("http://p2:80")
+    p3 = Proxy.from_str("http://p3:80")
+    inner = _CountingProxyMap((p1, p2, p3))
+    cpm = ConfigurableProxyMap(inner, round_robin=True)
+
+    assert cpm["http://example.com"] == (p1, p2, p3)
+    assert cpm["http://example.com"] == (p2, p3, p1)
+    assert cpm["http://example.com"] == (p3, p1, p2)
+    assert cpm["http://example.com"] == (p1, p2, p3)
+
+
+def test_configurable_proxy_map_round_robin_noop_for_single_entry():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, round_robin=True)
+
+    assert cpm["http://example.com"] == (p,)
+    assert cpm["http://example.com"] == (p,)
+
+
+def test_configurable_proxy_map_probe_picks_first_reachable(monkeypatch):
+    import proxylib.proxy as proxy_module
+
+    p1 = Proxy.from_str("http://p1:80")
+    p2 = Proxy.from_str("http://p2:80")
+    inner = _CountingProxyMap((p1, p2))
+    cpm = ConfigurableProxyMap(inner, probe=True, probe_timeout=1.0)
+
+    monkeypatch.setattr(proxy_module, "first_working_proxy", lambda proxies, timeout: p2)
+
+    assert cpm["http://example.com"] == (p2,)
+
+
+def test_configurable_proxy_map_probe_raises_keyerror_when_none_reachable(monkeypatch):
+    import proxylib.proxy as proxy_module
+
+    p1 = Proxy.from_str("http://p1:80")
+    inner = _CountingProxyMap((p1,))
+    cpm = ConfigurableProxyMap(inner, probe=True)
+
+    def boom(proxies, timeout):
+        raise LookupError("no reachable proxy")
+
+    monkeypatch.setattr(proxy_module, "first_working_proxy", boom)
+
+    with pytest.raises(KeyError):
+        cpm["http://example.com"]
+
+
+def test_configurable_proxy_map_bypass_local_loopback():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, bypass_local=True)
+
+    assert cpm["http://127.0.0.1"] == [None]
+    assert inner.calls == []  # bypassed before ever consulting the inner map
+
+
+def test_configurable_proxy_map_bypass_local_does_not_affect_other_hosts():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, bypass_local=True)
+
+    assert cpm["http://example.com"] == (p,)
+
+
+def test_configurable_proxy_map_no_proxy_rules():
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, no_proxy=["example.com"])
+
+    assert cpm["http://example.com"] == [None]
+    assert cpm["http://other.com"] == (p,)
+
+
+def test_configurable_proxy_map_no_proxy_merges_with_global_defaults():
+    set_default_no_proxy(["fromdefault.com"])
+    p = Proxy.from_str("http://p:80")
+    inner = _CountingProxyMap((p,))
+    cpm = ConfigurableProxyMap(inner, no_proxy=["explicit.com"])
+
+    assert cpm["http://explicit.com"] == [None]
+    assert cpm["http://fromdefault.com"] == [None]
+    assert cpm["http://other.com"] == (p,)
 
 
 def test_package_exposes_version():

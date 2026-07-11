@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `ChainProxyMap(*maps)` (in `proxylib.proxy`): sequential fallback across
   `ProxyMap`s — a `KeyError` (no opinion) tries the next one, a definitive
   `[None]`/`[Proxy]` result stops the chain.
+- `ConfigurableProxyMap(proxymap, ...)` (in `proxylib.proxy`): decorates any
+  `ProxyMap` with opt-in caching (`cache_ttl=`), active reachability probing
+  (`probe=`/`probe_timeout=`, via `netutils.first_working_proxy`),
+  round-robin selection (`round_robin=`), browser-style HTTPS privacy
+  stripping (`browser_compatibility=`), and an implicit local-address bypass
+  (`bypass_local=`) plus `no_proxy=` rules (merged with the global
+  `set_default_no_proxy()` defaults).
+- `netutils.is_loopback_or_link_local()`: shared helper (loopback +
+  `169.254/16`/`fe80::/10`) used by both `EnvProxyConfig`'s `<local>`
+  handling and `ConfigurableProxyMap`'s `bypass_local=`.
 - Pluggable PAC JS engines (`proxylib.pac.engines`): `JSProxyAutoConfig`/
   `JSContext` now run against a small `JSEngine` interface instead of
   `dukpy` directly. New optional `quickjs` backend (`proxylib[quickjs]`
@@ -90,6 +100,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `get_local_interfaces()` results are now cached for 10s (`cache_ttl=`
   param) — interface enumeration blocks, and `<local>`-in-`NO_PROXY` lookups
   call it per request.
+- `<local>` (`NO_PROXY`) now also bypasses link-local addresses
+  (`169.254/16`, `fe80::/10`) unconditionally, not just when they happen to
+  match a local interface's subnet.
 
 ### Removed
 

@@ -6,7 +6,7 @@ import ipaddress as _ip
 import os
 from typing import Iterable, List, Optional, Tuple, Union
 
-from .netutils import get_ip, get_local_interfaces
+from .netutils import get_ip, get_local_interfaces, is_loopback_or_link_local
 from .proxy import URL, Proxy, ProxyMap, SimpleProxyMap
 
 __all__ = ("EnvProxyConfig", "set_default_no_proxy", "get_default_no_proxy")
@@ -111,11 +111,13 @@ class EnvProxyConfig(ProxyMap):
         ip_literal_checked = False
         for entry in self.no_proxy:
             if entry is None:
-                # "<local>": bypass the proxy for loopback and same-subnet addresses.
+                # "<local>": bypass the proxy for loopback/link-local addresses
+                # (shared with ConfigurableProxyMap's bypass_local=) and for
+                # addresses on the same subnet as a local interface.
                 ip = get_ip(uri.host)
                 if ip is None:
                     continue
-                if ip.is_loopback:
+                if is_loopback_or_link_local(ip):
                     return [None]
                 for _if in get_local_interfaces():
                     if ip in _if.network:

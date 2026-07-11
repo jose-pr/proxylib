@@ -9,12 +9,23 @@ returns the sequence of ``Proxy`` (or ``None`` for DIRECT) to try, in order.
 
 from __future__ import annotations
 
+import threading
+import time
 import typing
-from typing import Iterable, Optional, Protocol, Sequence, Union, runtime_checkable
+from typing import Dict, Iterable, Optional, Protocol, Sequence, Tuple, Union, runtime_checkable
+from urllib.parse import urlsplit, urlunsplit
 
 from ._uri import URL, UriSplit, _URI
+from .netutils import first_working_proxy
 
-__all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap", "ChainProxyMap"]
+__all__ = [
+    "Proxy",
+    "ProxyMap",
+    "UriSplit",
+    "SimpleProxyMap",
+    "ChainProxyMap",
+    "ConfigurableProxyMap",
+]
 
 
 class Proxy(_URI):
@@ -187,3 +198,106 @@ class ChainProxyMap(ProxyMap):
             except KeyError:
                 continue
         raise KeyError(uri)
+
+
+class ConfigurableProxyMap(ProxyMap):
+    """Decorates any ``ProxyMap`` with caching, active probing, round-robin
+    selection, browser-style privacy stripping, and an implicit local bypass.
+
+    All features are opt-in and independent; the decorated map's own result
+    contract (``KeyError``/``[None]``/``[Proxy]``) is preserved throughout.
+    """
+
+    def __init__(
+        self,
+        proxymap: ProxyMap,
+        *,
+        cache_ttl: "float|None" = None,
+        probe: bool = False,
+        probe_timeout: float = 5.0,
+        round_robin: bool = False,
+        browser_compatibility: bool = False,
+        bypass_local: bool = False,
+        no_proxy: "Iterable[str]|None" = None,
+    ) -> None:
+        self.proxymap = proxymap
+        self.cache_ttl = cache_ttl
+        self.probe = probe
+        self.probe_timeout = probe_timeout
+        self.round_robin = round_robin
+        self.browser_compatibility = browser_compatibility
+
+        # Local import: env.py imports proxy.py, so importing it back at
+        # module level here would be circular (same reason ProxyMap.__new__
+        # locally imports `pac`). Reused rather than reimplemented: an
+        # EnvProxyConfig(None, None, rules) has no configured http/https
+        # proxy, so it raises KeyError for anything NOT matched by `rules`
+        # and returns [None] for anything that is -- exactly the "bypass
+        # check" primitive this class needs, complete with CIDR/<local>
+        # matching and the Phase 2 global no_proxy defaults, for free.
+        bypass_rules = list(no_proxy or ())
+        if bypass_local:
+            # <local> already covers loopback + link-local (env.py shares
+            # netutils.is_loopback_or_link_local for that) plus same-subnet
+            # addresses -- a superset of what bypass_local asks for.
+            bypass_rules.append("<local>")
+        self._bypass_checker: "Optional[ProxyMap]" = None
+        if bypass_rules:
+            from .env import EnvProxyConfig
+
+            self._bypass_checker = EnvProxyConfig(None, None, bypass_rules)
+
+        self._cache: "Dict[str, Tuple[float, tuple]]" = {}
+        self._round_robin_index = 0
+        self._lock = threading.Lock()
+
+    def clear_cache(self) -> None:
+        self._cache.clear()
+
+    def _effective_url(self, url: str) -> str:
+        """Apply browser-style privacy stripping: for HTTPS, strip the
+        path/query/fragment before delegating (matches Chrome 52+/Firefox
+        53+ behavior toward PAC scripts -- HTTPS request details are
+        considered sensitive to leak to a PAC server)."""
+        if not self.browser_compatibility:
+            return url
+        parsed = urlsplit(url)
+        if parsed.scheme != "https":
+            return url
+        return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+    def __getitem__(self, url: str) -> Iterable[Optional[Proxy]]:
+        if self._bypass_checker is not None:
+            try:
+                return self._bypass_checker[url]
+            except KeyError:
+                pass  # not bypassed -- fall through to normal resolution
+
+        effective_url = self._effective_url(url)
+
+        if self.cache_ttl:
+            cached = self._cache.get(effective_url)
+            if cached is not None and (time.monotonic() - cached[0]) < self.cache_ttl:
+                return cached[1]
+
+        result: tuple = tuple(self.proxymap[effective_url])
+
+        if self.round_robin and len(result) > 1:
+            with self._lock:
+                index = self._round_robin_index % len(result)
+                self._round_robin_index += 1
+            result = result[index:] + result[:index]
+
+        if self.probe:
+            try:
+                result = (first_working_proxy(result, timeout=self.probe_timeout),)
+            except LookupError:
+                # No candidate was reachable -- a resolution failure, not a
+                # DIRECT decision (same reasoning as LibProxyMap/
+                # CFNetworkProxyMap's timeout/failure handling).
+                raise KeyError(url)
+
+        if self.cache_ttl:
+            self._cache[effective_url] = (time.monotonic(), result)
+
+        return result

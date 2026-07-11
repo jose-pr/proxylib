@@ -112,6 +112,17 @@ def get_ip(address: str) -> "_ip.IPv4Address|_ip.IPv6Address|None":
         return None
 
 
+def is_loopback_or_link_local(ip: "_ip.IPv4Address|_ip.IPv6Address") -> bool:
+    """True for loopback (``127/8``, ``::1``) or link-local (``169.254/16``,
+    ``fe80::/10``) addresses -- these can never usefully go through a proxy
+    (link-local is inherently confined to the local link). Shared by
+    ``env.py``'s ``<local>`` `NO_PROXY` handling and
+    ``ConfigurableProxyMap``'s ``bypass_local=`` option so the definition
+    only lives in one place.
+    """
+    return ip.is_loopback or ip.is_link_local
+
+
 _DEFAULT_PORTS = {
     "http": 80,
     "https": 443,
