@@ -90,6 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   simplifies offline/sandboxed testing and DNS mocking. A PAC script that
   redefines the same name in JS still overrides it, same as any other
   exported function.
+- `release.yaml` now scrapes the pushed tag's `CHANGELOG.md` section into
+  the GitHub Release body (this repo pushes commits directly, so GitHub's
+  own auto-generated release notes are thin on every release).
 
 ### Changed
 

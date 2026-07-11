@@ -90,23 +90,48 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
+      - name: Extract CHANGELOG.md section for this tag
+        shell: python
+        run: |
+          import pathlib
+          import re
+          import sys
+
+          tag = "${{ github.ref_name }}"
+          version = tag[1:] if tag.startswith("v") else tag  # v1.0.0-rc.1 -> 1.0.0-rc.1
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Stop before the next "## [version]" heading, or before the
+          # trailing "[version]: https://..." reference-link block at the
+          # end of the file (only relevant when this tag is the oldest
+          # tracked release, so there's no next heading to stop at).
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]:\s|\Z)",
+              changelog,
+              re.DOTALL | re.MULTILINE,
+          )
+          if not match:
+              sys.exit(f"No CHANGELOG.md section found for version {version!r}")
+          pathlib.Path("release_notes.md").write_text(match.group(1).strip() + "\n", encoding="utf-8")
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          # GitHub computes the "What's Changed" commit/PR list and a
-          # "Full Changelog: <compare link>" line against the previous tag
-          # automatically -- this is the diff-since-last-release the tag
-          # push should produce.
+          # This repo pushes commits directly (no PR flow), so GitHub's
+          # auto-generated "What's Changed" is thin/empty on every release,
+          # not just the first -- the scraped CHANGELOG.md section is the
+          # real notes. generate_release_notes still runs and appends its
+          # own "Full Changelog: <compare link>" line after body_path's
+          # content, which is worth keeping.
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
-          body: |
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for the curated summary.
+          body_path: release_notes.md
 
   publish-pypi:
     name: Publish to PyPI
