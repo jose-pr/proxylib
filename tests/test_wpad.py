@@ -21,6 +21,27 @@ def test_candidate_domains_short_fqdn_yields_nothing():
     assert list(_candidate_domains("host.com")) == []
 
 
+def test_resolve_with_timeout_gives_up_on_a_hanging_socket_call(monkeypatch):
+    import threading
+    import time
+
+    release = threading.Event()
+
+    def hanging_gethostbyname(host):
+        release.wait(timeout=5.0)  # simulates a DNS server that never replies
+        return "10.0.0.1"
+
+    monkeypatch.setattr(wpad.socket, "gethostbyname", hanging_gethostbyname)
+
+    start = time.monotonic()
+    result = wpad._resolve_with_timeout("wpad.example.com", 0.1)
+    elapsed = time.monotonic() - start
+
+    release.set()  # let the abandoned worker thread finish so it doesn't leak past the test
+    assert result is None
+    assert elapsed < 1.0  # gave up around the 0.1s timeout, not the 5s hang
+
+
 def test_discover_returns_none_when_no_wpad_host_resolves(monkeypatch):
     monkeypatch.setattr(
         "socket.gethostbyname", lambda host: (_ for _ in ()).throw(OSError())

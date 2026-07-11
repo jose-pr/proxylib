@@ -77,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   extra) alongside the existing `dukpy` one (`proxylib[jspac]`). Select
   with the `PROXYLIB_JS_ENGINE` env var (comma-separated priority list,
   e.g. `PROXYLIB_JS_ENGINE=quickjs,dukpy`); defaults to preferring `dukpy`.
+- WPAD discovery now fails fast on a hanging DNS lookup: `socket.gethostbyname`
+  has no timeout parameter, so it's now run in a worker thread with a
+  `future.result(timeout=...)` deadline (same `timeout` the HTTP fetch
+  already used) instead of blocking indefinitely.
 
 ### Changed
 

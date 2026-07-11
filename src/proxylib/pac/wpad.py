@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FutureTimeoutError
 from typing import Dict, Iterator, Optional, Tuple
 from urllib.error import URLError
 
@@ -21,6 +23,25 @@ __all__ = ("discover",)
 # most, since "auto-detect on, but no WPAD server" would otherwise re-walk
 # DNS lookups and HTTP probes with multi-second timeouts on every call.
 _cache: "Dict[str, Tuple[float, Optional[PAC]]]" = {}
+
+# socket.gethostbyname has no timeout parameter -- the HTTP fetch below
+# already has one (`load(..., timeout=timeout)`), but a DNS server that
+# never replies would otherwise block this function indefinitely. Run
+# resolution in a worker thread and give up after `timeout` seconds;
+# there's no portable way to actually cancel a blocking C-level DNS call,
+# so an abandoned lookup keeps running in the background until it finishes
+# or errors on its own -- the result is just discarded. A small persistent
+# pool (never shut down) avoids blocking on ThreadPoolExecutor.__exit__,
+# which waits for in-flight work.
+_resolver_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="proxylib-wpad-dns")
+
+
+def _resolve_with_timeout(host: str, timeout: float) -> "Optional[str]":
+    future = _resolver_executor.submit(socket.gethostbyname, host)
+    try:
+        return future.result(timeout=timeout)
+    except (_FutureTimeoutError, OSError):
+        return None
 
 
 def _candidate_domains(fqdn: str) -> Iterator[str]:
@@ -37,9 +58,7 @@ def _candidate_domains(fqdn: str) -> Iterator[str]:
 def _discover(fqdn: str, timeout: float, **urllib_kwds) -> "Optional[PAC]":
     for domain in _candidate_domains(fqdn):
         host = f"wpad.{domain}"
-        try:
-            socket.gethostbyname(host)
-        except OSError:
+        if _resolve_with_timeout(host, timeout) is None:
             continue
         try:
             return load(f"http://{host}/wpad.dat", timeout=timeout, **urllib_kwds)
