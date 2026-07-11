@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install proxylib with all extras
-        run: python -m pip install -e ".[dev,jspac,ifaddr,requests]"
+        run: python -m pip install -e ".[dev,jspac,ifaddr]"
 
       # GNOME/MATE proxy detection (Phase 3) is only exercisable against a
       # real gsettings/dconf + dbus session, not just monkeypatched seams.

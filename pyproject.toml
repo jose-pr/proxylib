@@ -25,10 +25,13 @@ classifiers = [
 dependencies = []
 [project.optional-dependencies]
 dev = ['build', 'twine', 'hatchling', 'pytest', 'requests']
-jspac = ['dukpy']
+# PAC-as-JS engines (proxylib.pac.engines) -- pick a specific one, or use the
+# "jspac" meta-extra for "any working engine" (currently an alias for the
+# default-priority one; see proxylib.pac.engines._DEFAULT_PRIORITY).
+dukpy = ['dukpy']
 quickjs = ['quickjs']
+jspac = ['dukpy']
 ifaddr = ['ifaddr']
-requests = ['requests']
 docs = ['mkdocs', 'mkdocs-material', 'mkdocstrings[python]']
 
 [project.urls]

@@ -76,9 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Pluggable PAC JS engines (`proxylib.pac.engines`): `JSProxyAutoConfig`/
   `JSContext` now run against a small `JSEngine` interface instead of
   `dukpy` directly. New optional `quickjs` backend (`proxylib[quickjs]`
-  extra) alongside the existing `dukpy` one (`proxylib[jspac]`). Select
+  extra) alongside the existing `dukpy` one (`proxylib[dukpy]`). Select
   with the `PROXYLIB_JS_ENGINE` env var (comma-separated priority list,
   e.g. `PROXYLIB_JS_ENGINE=quickjs,dukpy`); defaults to preferring `dukpy`.
+  `proxylib[jspac]` is now a meta-extra for "any working engine" (currently
+  aliases `proxylib[dukpy]`).
 - WPAD discovery now fails fast on a hanging DNS lookup: `socket.gethostbyname`
   has no timeout parameter, so it's now run in a worker thread with a
   `future.result(timeout=...)` deadline (same `timeout` the HTTP fetch
@@ -134,6 +136,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `RequestsProxies` — renamed to `ProxyDict` (see Added); the old name is
   gone. Only ever published under a release candidate (`1.0.0-rc.1`), so no
   stable release carried it.
+- `proxylib[requests]` extra. `requests` support has always worked whenever
+  the package happens to be installed (guarded by `try/except ImportError`);
+  installing `requests` isn't a proxylib feature, so there was nothing for
+  this extra to add over `pip install requests` itself.
 
 ### Fixed
 
