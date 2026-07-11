@@ -14,7 +14,7 @@ from typing import Iterable, Optional, Protocol, Sequence, Union, runtime_checka
 
 from ._uri import URL, UriSplit, _URI
 
-__all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap", "ProxyDict"]
+__all__ = ["Proxy", "ProxyMap", "UriSplit", "SimpleProxyMap", "ChainProxyMap"]
 
 
 class Proxy(_URI):
@@ -160,38 +160,30 @@ class SimpleProxyMap(ProxyMap):
         return self.proxies
 
 
-class ProxyDict(ProxyMap):
-    """Duck-types the plain ``{scheme_or_url: "proxy://uri"}`` proxies dict that
-    ``requests`` and similar libraries accept, resolving from a ``ProxyMap``.
+class ChainProxyMap(ProxyMap):
+    """Tries each ``ProxyMap`` in order; the first one with an opinion wins.
 
-    The simpler integration when a Transport Adapter/handler isn't wanted::
+    Works *because of* the codified result contract (see ``ProxyMap``'s
+    docstring): a constituent map's ``KeyError`` means "no opinion, try the
+    next one", while a ``[None]``/``[Proxy]`` result is definitive and
+    stops the chain immediately -- e.g. ``ChainProxyMap(EnvProxyConfig(...),
+    pac_map)`` falls through to the PAC map only when the env config has no
+    proxy configured for that scheme, not merely when it resolves to DIRECT.
 
-        requests.get(url, proxies=ProxyDict(proxymap))
-
-    Consumers of a proxies dict look keys up by scheme/host, not the full
-    request URL, so path-dependent rules (most PAC scripts) won't apply --
-    use ``ProxyMapAdapter``/``ProxyMapHandler`` when that fidelity matters.
-
-    Lookups return the first proxy's URI string; DIRECT raises ``KeyError``
-    (a missing key means "no proxy", matching the dict convention).
+    If every constituent map raises ``KeyError``, the chain does too --
+    "no opinion" composes, so a ``ChainProxyMap`` can itself be one link in
+    a larger chain.
     """
 
-    __slots__ = ("proxymap",)
+    __slots__ = ("maps",)
 
-    def __init__(self, proxymap: ProxyMap) -> None:
-        self.proxymap = proxymap
+    def __init__(self, *maps: ProxyMap) -> None:
+        self.maps = maps
 
-    def __getitem__(self, uri: str) -> str:
-        try:
-            proxy = next(iter(self.proxymap[uri]))
-            if proxy is None:
-                raise KeyError(uri)
-            return proxy.as_uri()
-        except StopIteration:
-            raise KeyError(uri)
-
-    def copy(self) -> "ProxyDict":
-        return type(self)(self.proxymap)
-
-    def setdefault(self, url: str, value: str) -> None:
-        """No-op: requests calls this to merge env proxies; the ProxyMap wins."""
+    def __getitem__(self, uri: str) -> Iterable[Optional[Proxy]]:
+        for proxymap in self.maps:
+            try:
+                return proxymap[uri]
+            except KeyError:
+                continue
+        raise KeyError(uri)

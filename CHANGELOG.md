@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `PAC.dnsResolve` results are now cached for 30 seconds by default
   (`cache_ttl=` param) — real-world PAC scripts often call it repeatedly for
   the same host.
+- `ChainProxyMap(*maps)` (in `proxylib.proxy`): sequential fallback across
+  `ProxyMap`s — a `KeyError` (no opinion) tries the next one, a definitive
+  `[None]`/`[Proxy]` result stops the chain.
 - Pluggable PAC JS engines (`proxylib.pac.engines`): `JSProxyAutoConfig`/
   `JSContext` now run against a small `JSEngine` interface instead of
   `dukpy` directly. New optional `quickjs` backend (`proxylib[quickjs]`
@@ -77,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `proxylib.integrations.requests`/`proxylib.integrations.urllib` — no shim
   kept at the old module paths (pre-1.0 breaking change; top-level
   `from proxylib import ProxyMapAdapter, ProxyMapHandler` is unaffected).
+- `ProxyDict` moved from `proxylib.proxy` to `proxylib.integrations.dict`,
+  and no longer subclasses `ProxyMap` (composition instead — its
+  `__getitem__` returns `str`, which was an LSP violation as a `ProxyMap`
+  subclass). Top-level `from proxylib import ProxyDict` is unaffected.
 - `EnvProxyConfig` now raises `KeyError` (instead of returning DIRECT) for a
   scheme with no configured env proxy, so a future `ChainProxyMap` can fall
   through to the next map instead of env "winning" by default.
@@ -92,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `ProxyMapAdapter` no longer loses to environment-injected proxies:
+  `requests.Session.merge_environment_settings` merges `HTTP_PROXY`/
+  `HTTPS_PROXY` into the `proxies` dict at the *scheme* level before
+  `adapter.send()` runs, so the old `proxies.setdefault(resolved.scheme, ...)`
+  always lost when `trust_env=True` (the `requests` default), and a DIRECT
+  result didn't disable the env proxy at all. Now writes the more-specific
+  `scheme://hostname` key `select_proxy()` checks first. As a consequence,
+  only an explicit `proxies=` entry at that *same* key still overrides the
+  `ProxyMap`'s decision — a less-specific one (e.g. a bare `"http"` key)
+  no longer does.
 - Proxy URLs with a trailing slash (`HTTP_PROXY=http://proxy:8080/`, a very
   common shape) were misclassified as PAC-file URLs and routed to the PAC
   loader, which tried to fetch the proxy itself as a PAC script and failed.

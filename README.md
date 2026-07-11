@@ -139,7 +139,7 @@ like a PAC file/URL is loaded with `load_pac`.
 
 | Module | Purpose |
 | --- | --- |
-| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ProxyDict`, URI parsing |
+| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, URI parsing |
 | `proxylib.env` | `EnvProxyConfig` — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` |
 | `proxylib.os` | `system_proxy()` / `auto_proxy()` — platform dispatch + WPAD fallback |
 | `proxylib.os.nt` / `.darwin` | Windows (WinHTTP API) / macOS (`scutil`) system proxy backends |
@@ -149,6 +149,7 @@ like a PAC file/URL is loaded with `load_pac`.
 | `proxylib.pac.javascript` | `JSContext` — the `dukpy`-backed JS execution engine |
 | `proxylib.integrations.requests` | `ProxyMapAdapter` — the recommended `requests` integration |
 | `proxylib.integrations.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
+| `proxylib.integrations.dict` | `ProxyDict` — the plain proxies-dict integration |
 | `proxylib.netutils` | `get_ip`, `get_default_port`, `get_local_interfaces`, `first_working_proxy` |
 
 Every `ProxyMap` implementation (`SimpleProxyMap`, `EnvProxyConfig`, `PAC`, ...) answers

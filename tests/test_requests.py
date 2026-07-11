@@ -70,8 +70,10 @@ def test_proxy_map_adapter_injects_resolved_proxy(captured_send):
 
     session.get("http://example.com", proxies={})
 
-    assert captured_send["proxies"]["http"] == "http://proxy:8080"
-    assert captured_send["proxies"]["all"] == "http://proxy:8080"
+    # The most-specific key select_proxy() checks (scheme://hostname), not a
+    # bare scheme/"all" key -- see the env-precedence regression test below
+    # for why that specificity matters.
+    assert captured_send["proxies"]["http://example.com"] == "http://proxy:8080"
 
 
 def test_proxy_map_adapter_direct_sets_no_proxy(captured_send):
@@ -79,13 +81,54 @@ def test_proxy_map_adapter_direct_sets_no_proxy(captured_send):
 
     session.get("http://example.com", proxies={})
 
-    assert captured_send["proxies"] == {}
+    assert captured_send["proxies"]["http://example.com"] is None
 
 
-def test_proxy_map_adapter_explicit_proxy_takes_precedence(captured_send):
+def test_proxy_map_adapter_explicit_proxy_at_same_key_takes_precedence(captured_send):
+    # An explicit proxies= entry at the *same* scheme://hostname key the
+    # adapter itself would write still wins (setdefault, not overwrite) --
+    # a less-specific key (bare "http") no longer does, since a per-request
+    # ProxyMap decision is more specific by definition (see the class
+    # docstring and the env-precedence test below).
     proxymap = SimpleProxyMap(Proxy.from_str("http://autoproxy:8080"))
     session = _session_with(ProxyMapAdapter(proxymap))
 
-    session.get("http://example.com", proxies={"http": "http://explicit:9999"})
+    session.get("http://example.com", proxies={"http://example.com": "http://explicit:9999"})
 
-    assert captured_send["proxies"]["http"] == "http://explicit:9999"
+    assert captured_send["proxies"]["http://example.com"] == "http://explicit:9999"
+
+
+def test_proxy_map_adapter_no_opinion_leaves_proxies_untouched(captured_send):
+    # A ProxyMap that raises KeyError (no opinion) must not add any key at
+    # all -- distinct from an explicit DIRECT ([None]), which does (see
+    # test_proxy_map_adapter_direct_sets_no_proxy above).
+    class NoOpinionMap:
+        def __getitem__(self, url):
+            raise KeyError(url)
+
+    session = _session_with(ProxyMapAdapter(NoOpinionMap()))
+
+    session.get("http://example.com", proxies={"http": "http://from-caller:8080"})
+
+    assert captured_send["proxies"] == {"http": "http://from-caller:8080"}
+
+
+def test_proxy_map_adapter_wins_over_env_proxy_when_trust_env(monkeypatch, captured_send):
+    # Regression for the env-precedence bug: with trust_env=True (requests'
+    # own default), Session.merge_environment_settings merges HTTP_PROXY in
+    # via proxies.setdefault(scheme, ...) *before* adapter.send() runs. The
+    # old proxies.setdefault(resolved.scheme, ...) implementation lost to
+    # that every time; writing the more-specific scheme://hostname key wins
+    # regardless of merge order.
+    monkeypatch.setenv("HTTP_PROXY", "http://from-env:9999")
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+
+    proxymap = SimpleProxyMap(Proxy.from_str("http://from-proxymap:8080"))
+    session = requests.Session()
+    session.trust_env = True
+    session.mount("http://", ProxyMapAdapter(proxymap))
+
+    session.get("http://example.com")
+
+    assert captured_send["proxies"]["http://example.com"] == "http://from-proxymap:8080"

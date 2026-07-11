@@ -1,6 +1,6 @@
 import pytest
 
-from proxylib import Proxy, ProxyMap, SimpleProxyMap, UriSplit
+from proxylib import ChainProxyMap, Proxy, ProxyMap, SimpleProxyMap, UriSplit
 from proxylib.proxy import URL, _URI
 
 
@@ -103,6 +103,43 @@ def test_uri_from_str_bare_hostname_raises_value_error():
     # a clear ValueError, not an AttributeError on None later.
     with pytest.raises(ValueError):
         URL.from_str("example.com")
+
+
+class _KeyErrorMap:
+    def __getitem__(self, uri):
+        raise KeyError(uri)
+
+
+def test_chain_proxy_map_falls_through_keyerror_to_next_map():
+    p = Proxy.from_str("http://p:80")
+    chain = ChainProxyMap(_KeyErrorMap(), SimpleProxyMap(p))
+    assert chain["http://example.com"] == (p,)
+
+
+def test_chain_proxy_map_first_definitive_map_wins():
+    p1 = Proxy.from_str("http://p1:80")
+    p2 = Proxy.from_str("http://p2:80")
+    chain = ChainProxyMap(SimpleProxyMap(p1), SimpleProxyMap(p2))
+    assert chain["http://example.com"] == (p1,)
+
+
+def test_chain_proxy_map_direct_result_is_definitive_and_stops():
+    p = Proxy.from_str("http://p:80")
+    chain = ChainProxyMap(SimpleProxyMap("DIRECT"), SimpleProxyMap(p))
+    assert chain["http://example.com"] == [None]
+
+
+def test_chain_proxy_map_raises_keyerror_when_all_maps_have_no_opinion():
+    chain = ChainProxyMap(_KeyErrorMap(), _KeyErrorMap())
+    with pytest.raises(KeyError):
+        chain["http://example.com"]
+
+
+def test_chain_proxy_map_can_nest():
+    p = Proxy.from_str("http://p:80")
+    inner = ChainProxyMap(_KeyErrorMap())
+    outer = ChainProxyMap(inner, SimpleProxyMap(p))
+    assert outer["http://example.com"] == (p,)
 
 
 def test_package_exposes_version():

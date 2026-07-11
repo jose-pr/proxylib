@@ -12,6 +12,7 @@ from .pac import JSProxyAutoConfig as JSProxyAutoConfig
 from .pac import load as load_pac
 from .pac.wpad import discover as discover_pac
 from .proxy import *
+from .integrations.dict import ProxyDict as ProxyDict
 from .integrations.requests import ProxyMapAdapter as ProxyMapAdapter
 from .integrations.urllib import ProxyMapHandler as ProxyMapHandler
 
