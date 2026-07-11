@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `proxylib[quickjs]` now installs `quickjs-ng` (an actively maintained, drop-in-compatible
+  fork — same `import quickjs`/API) on Python 3.10+, which ships wheels through 3.13/3.14;
+  Python 3.9 keeps the original `quickjs` package, which still has a cp39 wheel. `quickjs`
+  is consequently now part of the CI/release install lines.
+- The default JS engine priority (`PROXYLIB_JS_ENGINE` unset) now prefers `quickjs` over
+  `dukpy` when both are installed, instead of the other way around — `quickjs` is the
+  closer-to-spec/faster engine when its dependency happens to be present. `dukpy` remains
+  what `proxylib[jspac]` installs and the runtime fallback when quickjs isn't available.
+
 ## [1.0.0] - 2026-07-11
 
 ### Added

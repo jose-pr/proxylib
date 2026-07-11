@@ -29,7 +29,10 @@ dev = ['build', 'twine', 'hatchling', 'pytest', 'requests']
 # "jspac" meta-extra for "any working engine" (currently an alias for the
 # default-priority one; see proxylib.pac.engines._DEFAULT_PRIORITY).
 dukpy = ['dukpy']
-quickjs = ['quickjs']
+quickjs = [
+    'quickjs; python_version < "3.10"',
+    'quickjs-ng; python_version >= "3.10"',
+]
 jspac = ['dukpy']
 ifaddr = ['ifaddr']
 docs = ['mkdocs', 'mkdocs-material', 'mkdocstrings[python]']

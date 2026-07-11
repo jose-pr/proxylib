@@ -8,19 +8,26 @@ def clear_proxylib_js_engine_env(monkeypatch):
     monkeypatch.delenv("PROXYLIB_JS_ENGINE", raising=False)
 
 
-def test_default_priority_is_dukpy_then_quickjs():
-    assert engines._priority() == ["dukpy", "quickjs"]
+def test_default_priority_is_quickjs_then_dukpy():
+    assert engines._priority() == ["quickjs", "dukpy"]
 
 
 def test_env_var_overrides_priority(monkeypatch):
-    monkeypatch.setenv("PROXYLIB_JS_ENGINE", "quickjs,dukpy")
-    assert engines._priority() == ["quickjs", "dukpy"]
+    monkeypatch.setenv("PROXYLIB_JS_ENGINE", "dukpy,quickjs")
+    assert engines._priority() == ["dukpy", "quickjs"]
 
 
 def test_env_var_is_comma_separated_only(monkeypatch):
     # One delimiter -- not space/colon/semicolon/os.pathsep.
-    monkeypatch.setenv("PROXYLIB_JS_ENGINE", " quickjs , dukpy ")
-    assert engines._priority() == ["quickjs", "dukpy"]
+    monkeypatch.setenv("PROXYLIB_JS_ENGINE", " dukpy , quickjs ")
+    assert engines._priority() == ["dukpy", "quickjs"]
+
+
+def test_get_engine_class_prefers_quickjs_over_dukpy_when_both_available(monkeypatch):
+    quickjs_stub = type("QuickJSStub", (), {})
+    dukpy_stub = type("DukpyStub", (), {})
+    monkeypatch.setattr(engines, "_ENGINES", {"quickjs": quickjs_stub, "dukpy": dukpy_stub})
+    assert engines.get_engine_class() is quickjs_stub
 
 
 def test_get_engine_class_honors_env_priority(monkeypatch):

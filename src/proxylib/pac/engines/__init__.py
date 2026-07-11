@@ -2,9 +2,13 @@
 
 Select which one :class:`~proxylib.pac.javascript.JSContext` uses via the
 ``PROXYLIB_JS_ENGINE`` env var -- a **comma-separated** priority list (e.g.
-``"quickjs,dukpy"``), one delimiter only. Each entry is tried in order;
+``"dukpy,quickjs"``), one delimiter only. Each entry is tried in order;
 the first one that's actually installed wins. Unset defaults to
-``("dukpy", "quickjs")``.
+``("quickjs", "dukpy")`` -- quickjs is the closer-to-spec/faster engine
+when its (optional, C-extension) dependency happens to be installed;
+``proxylib[jspac]`` still installs plain `dukpy` (pure-Python wheel, no C
+toolchain risk) as the "any working engine" default, and dukpy remains the
+runtime fallback when quickjs isn't present.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ _ENGINES: "Dict[str, Optional[Type]]" = {
     "quickjs": QuickJSEngine if _quickjs_available else None,
 }
 
-_DEFAULT_PRIORITY = ("dukpy", "quickjs")
+_DEFAULT_PRIORITY = ("quickjs", "dukpy")
 
 
 def _priority() -> "List[str]":

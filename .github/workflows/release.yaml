@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install proxylib with all extras
-        run: python -m pip install -e ".[dev,jspac,ifaddr]"
+        run: python -m pip install -e ".[dev,jspac,quickjs,ifaddr]"
       - name: Run tests
         run: python -m pytest -q
 
@@ -60,7 +60,7 @@ jobs:
           python-version: "3.x"
       - uses: actions/configure-pages@v5
       - name: Install proxylib with docs tooling
-        run: python -m pip install -e ".[dev,jspac,ifaddr,docs]"
+        run: python -m pip install -e ".[dev,jspac,quickjs,ifaddr,docs]"
       - name: Build docs
         run: mkdocs build --strict
       - name: Upload Pages artifact

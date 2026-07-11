@@ -33,7 +33,7 @@ Zero required runtime dependencies; a couple of optional extras unlock more (see
 - **PAC support** — the full Netscape PAC utility-function set (including
   `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions, runnable either
   as real JavaScript through a pluggable engine (`dukpy` or `quickjs`, picked via
-  `PROXYLIB_JS_ENGINE` or whichever is installed) or by subclassing in Python.
+  `PROXYLIB_JS_ENGINE` or preferring `quickjs` if installed) or by subclassing in Python.
 - **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup. Used directly by
   `system_proxy()` on any platform/desktop whose own auto-detect setting is on, and as
   a generic last-resort fallback in `auto_proxy()` when nothing else is configured.
@@ -64,13 +64,13 @@ Optional extras:
 | --- | --- | --- |
 | `proxylib[jspac]` | `dukpy` | Executing PAC files as JavaScript — "any working engine" meta-extra |
 | `proxylib[dukpy]` | `dukpy` | The `dukpy` JS engine specifically |
-| `proxylib[quickjs]` | `quickjs` | The `quickjs` JS engine specifically (no dependency on `dukpy`) |
+| `proxylib[quickjs]` | `quickjs-ng` (Python ≥3.10) / `quickjs` (Python 3.9) | The `quickjs` JS engine specifically (no dependency on `dukpy`) |
 | `proxylib[ifaddr]` | `ifaddr` | Accurate local network interface/prefix enumeration (used by `NO_PROXY <local>`) |
 
 Without a JS engine installed, PAC files are still fetched and validated, but evaluate
 to `DIRECT` (with a warning) since there's no engine to run them. With more than one
-installed, `PROXYLIB_JS_ENGINE=dukpy` (or `quickjs`, or a comma-separated priority list)
-picks which one runs.
+installed, `quickjs` is preferred by default; set `PROXYLIB_JS_ENGINE=dukpy` (or a
+comma-separated priority list) to change that.
 
 ## Quick start
 
