@@ -7,6 +7,9 @@ from .env import set_default_no_proxy as set_default_no_proxy
 from .netutils import first_working_proxy as first_working_proxy
 from .os import auto_proxy, system_proxy
 from .os.posix.libproxy import LibProxyMap as LibProxyMap
+from .patching import patch as patch
+from .patching import register_patcher as register_patcher
+from .patching import unpatch as unpatch
 from .pac import PAC as PAC
 from .pac import JSProxyAutoConfig as JSProxyAutoConfig
 from .pac import load as load_pac

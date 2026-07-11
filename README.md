@@ -139,7 +139,8 @@ like a PAC file/URL is loaded with `load_pac`.
 
 | Module | Purpose |
 | --- | --- |
-| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, URI parsing |
+| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, `ConfigurableProxyMap`, URI parsing |
+| `proxylib.patching` | `patch()` / `unpatch()` / `register_patcher()` — global patching registry |
 | `proxylib.env` | `EnvProxyConfig` — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` |
 | `proxylib.os` | `system_proxy()` / `auto_proxy()` — platform dispatch + WPAD fallback |
 | `proxylib.os.nt` / `.darwin` | Windows (WinHTTP API) / macOS (`scutil`) system proxy backends |

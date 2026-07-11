@@ -121,6 +121,21 @@ class ProxyMap(Protocol):
         except KeyError:
             return False
 
+    def __enter__(self):
+        # Local import: patching.py imports proxy.py, so a top-level import
+        # here would be circular (same reason ProxyMap.__new__ locally
+        # imports `pac`).
+        from . import patching
+
+        patching.patch(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        from . import patching
+
+        patching.unpatch()
+        return False
+
 
 def _looks_like_pac_source(src: str) -> bool:
     """Heuristic: does this string point at a PAC file/URL rather than name a single proxy authority?

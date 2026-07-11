@@ -29,6 +29,7 @@ nav:
       - System detection: api/os.md
       - PAC support: api/pac.md
       - requests / urllib integrations: api/integrations.md
+      - Patching registry: api/patching.md
   - Changelog: changelog.md
 
 plugins:

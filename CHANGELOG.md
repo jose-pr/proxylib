@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `netutils.is_loopback_or_link_local()`: shared helper (loopback +
   `169.254/16`/`fe80::/10`) used by both `EnvProxyConfig`'s `<local>`
   handling and `ConfigurableProxyMap`'s `bypass_local=`.
+- Extensible patching registry (`proxylib.patching`): `patch(proxymap,
+  targets=None)`/`unpatch()`/`register_patcher(name, patch_func,
+  unpatch_func)` globally wire an active `ProxyMap` into third-party HTTP
+  clients. Built-in targets: `"requests"` (newly constructed `Session`s
+  mount a `ProxyMapAdapter`) and `"urllib"` (installs a global opener).
+  `ProxyMap` instances are now usable as a context manager
+  (`with proxymap as active: ...`) equivalent to `patch()`/`unpatch()`.
 - Pluggable PAC JS engines (`proxylib.pac.engines`): `JSProxyAutoConfig`/
   `JSContext` now run against a small `JSEngine` interface instead of
   `dukpy` directly. New optional `quickjs` backend (`proxylib[quickjs]`
