@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-11
+
 ### Changed
 
 - `proxylib[quickjs]` now installs `quickjs-ng` (an actively maintained, drop-in-compatible
@@ -255,6 +257,7 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/jose-pr/proxylib/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jose-pr/proxylib/releases/tag/v1.0.0
 [1.0.0-rc.1]: https://github.com/jose-pr/proxylib/releases/tag/v1.0.0-rc.1
