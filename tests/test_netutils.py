@@ -9,8 +9,10 @@ from proxylib.proxy import Proxy, UriSplit
 @pytest.fixture(autouse=True)
 def clear_interfaces_cache():
     netutils.clear_interfaces_cache()
+    netutils.clear_circuit_breaker()
     yield
     netutils.clear_interfaces_cache()
+    netutils.clear_circuit_breaker()
 
 
 def test_get_ip_from_literal():
@@ -134,3 +136,63 @@ def test_first_working_proxy_raises_lookuperror_when_none_reachable(monkeypatch)
 
     with pytest.raises(LookupError):
         netutils.first_working_proxy([Proxy.from_str("http://p1:80"), Proxy.from_str("http://p2:80")])
+
+
+# ---- circuit breaker ------------------------------------------------------------
+
+
+def test_first_working_proxy_blacklists_a_failed_probe(monkeypatch):
+    fake = _FakeConnections(reachable={"p2"})
+    monkeypatch.setattr(netutils._socket, "create_connection", fake)
+
+    p1 = Proxy.from_str("http://p1:80")
+    p2 = Proxy.from_str("http://p2:80")
+
+    assert netutils.first_working_proxy([p1, p2]) is p2
+    assert fake.attempts == [("p1", 80), ("p2", 80)]
+
+    # p1 is blacklisted now -- a second call must not re-probe it.
+    fake.attempts.clear()
+    assert netutils.first_working_proxy([p1, p2]) is p2
+    assert fake.attempts == [("p2", 80)]
+
+
+def test_first_working_proxy_circuit_breaker_expires(monkeypatch):
+    fake = _FakeConnections(reachable=set())
+    monkeypatch.setattr(netutils._socket, "create_connection", fake)
+
+    clock = [1000.0]
+    p1 = Proxy.from_str("http://p1:80")
+
+    with pytest.raises(LookupError):
+        netutils.first_working_proxy([p1], circuit_breaker_ttl=30.0, clock=lambda: clock[0])
+
+    fake.attempts.clear()
+    fake.reachable.add("p1")
+    clock[0] += 31  # past the 30s blacklist window
+    result = netutils.first_working_proxy([p1], circuit_breaker_ttl=30.0, clock=lambda: clock[0])
+
+    assert result is p1
+    assert fake.attempts == [("p1", 80)]  # re-probed, not skipped
+
+
+def test_first_working_proxy_circuit_breaker_ttl_zero_disables_it(monkeypatch):
+    fake = _FakeConnections(reachable=set())
+    monkeypatch.setattr(netutils._socket, "create_connection", fake)
+
+    p1 = Proxy.from_str("http://p1:80")
+    with pytest.raises(LookupError):
+        netutils.first_working_proxy([p1], circuit_breaker_ttl=0)
+
+    fake.attempts.clear()
+    fake.reachable.add("p1")
+    result = netutils.first_working_proxy([p1], circuit_breaker_ttl=0)
+
+    assert result is p1
+    assert fake.attempts == [("p1", 80)]  # never blacklisted since the breaker was off
+
+
+def test_clear_circuit_breaker():
+    netutils._circuit_breaker[("p1", 80)] = float("inf")
+    netutils.clear_circuit_breaker()
+    assert netutils._circuit_breaker == {}

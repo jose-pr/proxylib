@@ -81,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   has no timeout parameter, so it's now run in a worker thread with a
   `future.result(timeout=...)` deadline (same `timeout` the HTTP fetch
   already used) instead of blocking indefinitely.
+- `first_working_proxy()` now has a circuit breaker: a proxy that fails its
+  probe is skipped (without re-probing) for 30 seconds by default
+  (`circuit_breaker_ttl=`), shared with `ConfigurableProxyMap(probe=True)`.
 
 ### Changed
 

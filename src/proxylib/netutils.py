@@ -10,7 +10,7 @@ from __future__ import annotations
 import ipaddress as _ip
 import socket as _socket
 import time as _time
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
     # Runtime import would be circular: proxy.py imports this module.
@@ -144,8 +144,24 @@ def get_default_port(scheme: str) -> "int|None":
         return None
 
 
+# (host, port) -> monotonic timestamp the blacklist expires at. A proxy
+# that just failed a reachability probe is skipped (without re-probing) for
+# circuit_breaker_ttl seconds -- avoids hammering a known-dead proxy on
+# every single first_working_proxy() call. clear_circuit_breaker() is the
+# seam tests use; the `clock` param is the injectable-clock seam (instead
+# of monkeypatching time.monotonic globally).
+_circuit_breaker: "Dict[Tuple[str, int], float]" = {}
+
+
+def clear_circuit_breaker() -> None:
+    _circuit_breaker.clear()
+
+
 def first_working_proxy(
-    proxies: "Iterable[Optional[Proxy]]", timeout: float = 5.0
+    proxies: "Iterable[Optional[Proxy]]",
+    timeout: float = 5.0,
+    circuit_breaker_ttl: "float|None" = 30.0,
+    clock: "Callable[[], float]" = _time.monotonic,
 ) -> "Optional[Proxy]":
     """Return the first entry that accepts a TCP connection, in order.
 
@@ -158,16 +174,28 @@ def first_working_proxy(
     probe. This only checks TCP reachability of the proxy port, not that the
     proxy will actually serve the request. Raises ``LookupError`` when no
     entry is reachable (``None`` can't signal failure here: it means DIRECT).
+
+    A proxy that fails its probe is blacklisted (skipped without probing)
+    for ``circuit_breaker_ttl`` seconds (default 30); pass ``0``/``None`` to
+    disable.
     """
+    now = clock()
     for proxy in proxies:
         if proxy is None:
             return None
         port = proxy.port or get_default_port(proxy.scheme)
         if not port:
             continue
+        key = (proxy.host, port)
+        if circuit_breaker_ttl:
+            blacklisted_until = _circuit_breaker.get(key)
+            if blacklisted_until is not None and now < blacklisted_until:
+                continue
         try:
             sock = _socket.create_connection((proxy.host, port), timeout=timeout)
         except OSError:
+            if circuit_breaker_ttl:
+                _circuit_breaker[key] = now + circuit_breaker_ttl
             continue
         sock.close()
         return proxy
