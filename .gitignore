@@ -7,7 +7,6 @@ __pycache__
 /dist
 /.venv
 /site
-AGENTS.md
 .agents
 CLAUDE*
 .claude
