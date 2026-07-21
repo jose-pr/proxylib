@@ -6,7 +6,7 @@ name: Test
 #   - push of a tag matching "ci-*" (throwaway tag, delete after) so an agent
 #     without dashboard access can trigger + poll a run via the API/CLI.
 # Never triggered by push/PR on branches -- this repo deliberately doesn't run
-# CI on every commit (see root AGENTS.md).
+# CI on every commit.
 on:
   workflow_dispatch:
     inputs:
@@ -44,7 +44,7 @@ jobs:
       - name: Install proxylib with all extras
         run: python -m pip install -e ".[dev,jspac,quickjs,ifaddr]"
 
-      # GNOME/MATE proxy detection (Phase 3) is only exercisable against a
+      # GNOME/MATE proxy detection is only exercisable against a
       # real gsettings/dconf + dbus session, not just monkeypatched seams.
       - name: Install desktop proxy tooling (gsettings/dbus)
         if: matrix.os == 'ubuntu-latest'
@@ -52,8 +52,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gsettings-desktop-schemas dbus-x11
 
-      # Diagnostic only (not a test assertion): Phase 3's gsettings-batching
-      # plan needs to know whether org.gnome.system.proxy's child schemas
+      # Diagnostic only (not a test assertion): gsettings batching
+      # needs to know whether org.gnome.system.proxy's child schemas
       # (.http, .https) are included in a recursive listing. Surface it in
       # the run log so that question can be answered from a real CI machine.
       - name: Probe gsettings recursive schema listing (diagnostic)

@@ -116,7 +116,7 @@ def system_proxy() -> "ProxyMap|str":
 # environment, so this was validated by pushing a throwaway ci-* tag and
 # running tests/test_os.py::test_cfnetworkproxymap_real_smoke (no mocking)
 # against a real macos-latest GitHub Actions runner -- passed on Python 3.9
-# and 3.13 (see root AGENTS.md for the run). That smoke test only confirms
+# and 3.13. That smoke test only confirms
 # the happy path (DIRECT/manual proxy on a runner with nothing configured);
 # the PAC-execution/run-loop-deadline branch is still unexercised by real
 # CI and should be treated with more caution until it is.
@@ -406,7 +406,6 @@ class CFNetworkProxyMap(ProxyMap):
     Validated by a real (unmocked) smoke test on macOS CI, but only for the
     common "direct/manual proxy" path -- the PAC-execution/run-loop-deadline
     branch is not yet exercised by that CI job, so treat it more cautiously.
-    See root ``AGENTS.md`` for details.
     """
 
     __slots__ = ("deadline",)

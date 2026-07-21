@@ -249,7 +249,7 @@ class ConfigurableProxyMap(ProxyMap):
         # proxy, so it raises KeyError for anything NOT matched by `rules`
         # and returns [None] for anything that is -- exactly the "bypass
         # check" primitive this class needs, complete with CIDR/<local>
-        # matching and the Phase 2 global no_proxy defaults, for free.
+        # matching and the global no_proxy defaults, for free.
         bypass_rules = list(no_proxy or ())
         if bypass_local:
             # <local> already covers loopback + link-local (env.py shares

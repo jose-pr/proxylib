@@ -80,7 +80,7 @@ def _gsettings_get(schema: str, key: str) -> "str|None":
     One recursive call on the base schema (``org.gnome.system.proxy``)
     covers the whole tree if child schemas (``.http``/``.https``) are
     included in its recursive listing -- unverified from this dev box, see
-    the Phase 1 CI diagnostic step. If a requested child-schema key isn't
+    the CI diagnostic step. If a requested child-schema key isn't
     present in that result, falls back to one additional recursive call
     scoped to the child schema itself (worst case 3 calls total instead of
     up to 7 single-key ``gsettings get`` calls).
