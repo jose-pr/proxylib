@@ -167,7 +167,7 @@ def test_no_proxy_star_entry_parses_to_the_wildcard_sentinel():
 def test_from_env_star_no_proxy(monkeypatch):
     # Clear every casing before setting one: on Windows os.environ is
     # case-insensitive, so a later delenv of the other casing would silently
-    # undo the setenv (see .agents/kb/testing.md).
+    # undo the setenv.
     monkeypatch.delenv("NO_PROXY", raising=False)
     monkeypatch.delenv("no_proxy", raising=False)
     monkeypatch.delenv("HTTP_PROXY", raising=False)
@@ -197,8 +197,7 @@ def test_default_no_proxy_star_merges_into_configurable_proxy_map():
     # so a global "*" bypasses through ConfigurableProxyMap as well.
     # NOTE: this constructs with bypass_local=True on purpose -- a bare
     # ConfigurableProxyMap(map) builds no bypass checker at all and therefore
-    # consults no defaults. See
-    # .agents/findings/configurable_proxy_map_ignores_default_no_proxy.md.
+    # consults no defaults, which is a separate known gap.
     from proxylib import ConfigurableProxyMap, SimpleProxyMap
 
     set_default_no_proxy(["*"])
