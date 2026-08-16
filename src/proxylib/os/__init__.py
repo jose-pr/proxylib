@@ -7,8 +7,9 @@ proxy configured.
 
 Both :func:`system_proxy` and :func:`auto_proxy` take a ``provider``:
 
-- ``"python"`` (default): proxylib's own detection + PAC-via-``dukpy``
-  path -- works everywhere, including sandboxes/testing.
+- ``"python"`` (default): proxylib's own detection + its own PAC-as-JS
+  path (whichever :mod:`proxylib.pac.engines` backend is installed) --
+  works everywhere, including sandboxes/testing.
 - ``"system"``: outsources resolution to the OS's native proxy engine
   (``WinHttpProxyMap`` on Windows, ``CFNetworkProxyMap`` on macOS,
   ``LibProxyMap`` on POSIX if its shared library is loadable -- falls back

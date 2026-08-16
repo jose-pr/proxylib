@@ -3,7 +3,7 @@
 Header-file-style reference for the `proxylib` package: every top-level export with its
 signature, arguments, contract, and gotchas, so this module can be consumed without
 reading its source. Kept current with the public API. For the project overview and
-install instructions, see the repo-root `AGENTS.md`.
+install instructions, see <https://github.com/jose-pr/proxylib#readme>.
 
 Every `ProxyMap` implementation answers the same question — `proxymap[url]` (or
 `.get(url, default)`) returns the sequence of `Proxy` (or `None` for DIRECT) to try, in

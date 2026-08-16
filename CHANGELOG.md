@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Documentation drift that shipped in the wheel and rendered on the docs site:
+  the `proxylib` API header no longer points at a repo-root `AGENTS.md` that
+  doesn't exist (it links the project README instead), the `requests`
+  integration no longer tells users to install a `proxylib[requests]` extra
+  that was removed before 1.0 (`requests` support activates whenever `requests`
+  is installed), the POSIX backend no longer claims libproxy is used via a
+  `proxy` CLI (it binds the shared library through `ctypes`), and the PAC
+  module/`load()` docstrings are engine-agnostic again — `dukpy` stopped being
+  the only option when the engine split landed.
+
 ## [1.0.1] - 2026-07-11
 
 ### Changed

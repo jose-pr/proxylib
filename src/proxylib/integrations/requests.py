@@ -1,6 +1,8 @@
 """``requests`` integration.
 
-``ProxyMapAdapter`` (needs the ``requests`` extra: ``proxylib[requests]``) is
+``ProxyMapAdapter`` (requires the ``requests`` package -- ``pip install
+requests``; this integration activates whenever ``requests`` happens to be
+installed, there is no proxylib extra to enable it) is
 the recommended way to wire a ``ProxyMap`` into a ``requests.Session`` — it
 hooks ``HTTPAdapter.send()``, so it sees the real request URL. For the
 simpler proxies-dict style (``requests.get(url, proxies=...)``) use

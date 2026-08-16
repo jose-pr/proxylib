@@ -1,7 +1,8 @@
 """PAC (Proxy Auto-Config) support: the standard Netscape utility functions a
 PAC script's ``FindProxyForURL`` relies on, plus the common Microsoft
 ``*Ex``/IPv6-aware extensions, and loading PAC scripts (as plain Python via
-subclassing, or as real JS via the optional ``dukpy`` backend).
+subclassing, or as real JS via an optional engine backend -- ``proxylib[jspac]``
+(dukpy) or ``proxylib[quickjs]``, see :mod:`proxylib.pac.engines`).
 """
 
 from __future__ import annotations
@@ -373,9 +374,9 @@ def clear_download_cache() -> None:
 def load(url: str, cache_ttl: "float|None" = 300.0, **urllib_kwds) -> PAC:
     """Load a PAC script from a URL, a ``file:`` path, or inline JS source.
 
-    Requires the ``dukpy`` extra (``proxylib[jspac]``) to actually execute
-    the script; without it, a warning is issued and an always-DIRECT
-    :class:`PAC` is returned instead.
+    Requires a JS engine -- ``proxylib[jspac]`` (dukpy) or
+    ``proxylib[quickjs]`` -- to actually execute the script; without one, a
+    warning is issued and an always-DIRECT :class:`PAC` is returned instead.
 
     Genuine network downloads (not ``file:`` paths or inline JS) are cached
     per URL for ``cache_ttl`` seconds (default 5 minutes); pass

@@ -3,7 +3,7 @@
 There is no single authoritative proxy config store on Linux; the portable
 convention is environment variables. As a best-effort improvement,
 :func:`system_proxy` also tries (in order): libproxy (:mod:`.libproxy`, if
-its ``proxy`` CLI is installed -- generally the most authoritative single
+its shared library is loadable -- generally the most authoritative single
 source since it's itself a full cross-desktop resolution engine), GNOME
 (:mod:`.gnome`), MATE (:mod:`.mate`), KDE (:mod:`.kde`), and NetworkManager
 (:mod:`.networkmanager`) -- each only if its respective binary/file is
