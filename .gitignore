@@ -11,3 +11,15 @@ __pycache__
 *.local.md
 CLAUDE*
 .claude
+
+# Standard Python block -- kept complete even for tools this repo doesn't
+# currently use, since these dirs first appear the moment someone runs one.
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+*.egg-info/
+.venv/

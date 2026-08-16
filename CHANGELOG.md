@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- URI scheme parsing no longer accepts a comma. The scheme character class was
+  written `[A-Za-z0-9+-.]`, in which `+-.` is the *range* `0x2B`–`0x2E` and so
+  also matched `,` (`0x2C`) — `http,x://host:1` parsed as a scheme of `http,x`.
+  RFC 3986 allows `ALPHA`/`DIGIT`/`+`/`-`/`.` only.
+- The GNOME/MATE gsettings backend no longer builds `http://host:None` when the
+  schema has a proxy host but no usable port (key absent, or `0` for "never
+  configured"); the port suffix is omitted so the scheme's default applies.
 - Documentation drift that shipped in the wheel and rendered on the docs site:
   the `proxylib` API header no longer points at a repo-root `AGENTS.md` that
   doesn't exist (it links the project README instead), the `requests`

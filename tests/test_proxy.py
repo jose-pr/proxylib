@@ -41,6 +41,26 @@ def test_scheme_aliases():
     assert Proxy.from_str("http://p:80").scheme == "http"
 
 
+def test_scheme_does_not_match_comma():
+    # The SCHEME char class used to be written "[A-Za-z0-9+-.]", where "+-."
+    # is the RANGE 0x2B-0x2E and therefore also matches "," (0x2C). RFC 3986
+    # allows ALPHA / DIGIT / "+" / "-" / "." only, so a comma must terminate
+    # the scheme instead of being swallowed into it.
+    import re
+
+    from proxylib._uri import SCHEME
+
+    assert re.fullmatch(SCHEME, "http,x") is None
+    # The three legitimate punctuation chars still work.
+    assert re.fullmatch(SCHEME, "a+b") is not None
+    assert re.fullmatch(SCHEME, "a-b") is not None
+    assert re.fullmatch(SCHEME, "a.b") is not None
+    assert re.fullmatch(SCHEME, "svn+ssh") is not None
+
+    parsed = Proxy.find_all("http,x://h:1")
+    assert not any(p is not None and p.scheme == "http,x" for p in parsed)
+
+
 def test_proxy_url_and_as_uri():
     proxy = Proxy.from_str("http://user:pass@proxy.example.com:8080")
     assert proxy.url == "http://proxy.example.com:8080"

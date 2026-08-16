@@ -114,7 +114,15 @@ def read_desktop_proxy(schema: str) -> "ProxyMap|str|None":
     def host_port(protocol: str) -> "str|None":
         host = _gsettings_get(f"{schema}.{protocol}", "host")
         port = _gsettings_get(f"{schema}.{protocol}", "port")
-        return f"http://{host}:{port}" if host else None
+        if not host:
+            return None
+        # A missing/blank/non-numeric port key must not become the literal
+        # string "http://host:None" -- gsettings can report a host with no
+        # usable port (key absent, or "0"/"uint32 0" for "unset"). Omit the
+        # suffix instead and let the scheme's default port apply.
+        if port and str(port).isdigit() and int(port):
+            return f"http://{host}:{port}"
+        return f"http://{host}"
 
     http_proxy = host_port("http")
     https_proxy = host_port("https") or http_proxy

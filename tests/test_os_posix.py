@@ -203,6 +203,82 @@ def test_gnome_auto_with_url_returns_pac_url(monkeypatch):
     assert gnome.detect() == "http://internal/proxy.pac"
 
 
+def _captured_proxy_urls(monkeypatch, gsettings, values):
+    """Run read_desktop_proxy over `values` and return the raw proxy URL
+    strings it hands to EnvProxyConfig.
+
+    Asserting on the strings rather than the resulting Proxy objects is
+    deliberate: Proxy normalizes a missing port to 0, and ``:None`` fails the
+    port regex and is dropped, so a malformed ``http://host:None`` parses to
+    exactly the same Proxy as a correct ``http://host``. The defect is only
+    observable in the intermediate string.
+    """
+    captured = {}
+    real = gsettings.EnvProxyConfig
+
+    def capture(http_proxy, https_proxy, no_proxy):
+        captured["http"] = http_proxy
+        captured["https"] = https_proxy
+        return real(http_proxy, https_proxy, no_proxy)
+
+    monkeypatch.setattr(gsettings, "_gsettings_get", _fake_gsettings(values))
+    monkeypatch.setattr(gsettings, "EnvProxyConfig", capture)
+    gsettings.read_desktop_proxy("org.gnome.system.proxy")
+    return captured
+
+
+def test_gnome_manual_host_without_port_omits_the_port_suffix(monkeypatch):
+    # gsettings can report a host with no port key at all. The URL used to be
+    # built as f"http://{host}:{port}" unconditionally, interpolating the
+    # Python None straight in -> the malformed "http://gnome-proxy:None".
+    import proxylib.os.posix._gsettings as gsettings
+
+    captured = _captured_proxy_urls(
+        monkeypatch,
+        gsettings,
+        {
+            ("org.gnome.system.proxy", "mode"): "manual",
+            ("org.gnome.system.proxy.http", "host"): "gnome-proxy",
+        },
+    )
+
+    assert captured["http"] == "http://gnome-proxy"
+    assert "None" not in captured["http"]
+
+
+def test_gnome_manual_zero_port_omits_the_port_suffix(monkeypatch):
+    # GNOME reports 0 for "port never configured"; ":0" is not a usable port.
+    import proxylib.os.posix._gsettings as gsettings
+
+    captured = _captured_proxy_urls(
+        monkeypatch,
+        gsettings,
+        {
+            ("org.gnome.system.proxy", "mode"): "manual",
+            ("org.gnome.system.proxy.http", "host"): "gnome-proxy",
+            ("org.gnome.system.proxy.http", "port"): "0",
+        },
+    )
+
+    assert captured["http"] == "http://gnome-proxy"
+
+
+def test_gnome_manual_keeps_a_real_port(monkeypatch):
+    import proxylib.os.posix._gsettings as gsettings
+
+    captured = _captured_proxy_urls(
+        monkeypatch,
+        gsettings,
+        {
+            ("org.gnome.system.proxy", "mode"): "manual",
+            ("org.gnome.system.proxy.http", "host"): "gnome-proxy",
+            ("org.gnome.system.proxy.http", "port"): "8080",
+        },
+    )
+
+    assert captured["http"] == "http://gnome-proxy:8080"
+
+
 def test_gnome_auto_blank_url_uses_wpad(monkeypatch):
     import proxylib.os.posix._gsettings as gsettings
     import proxylib.os.posix.gnome as gnome

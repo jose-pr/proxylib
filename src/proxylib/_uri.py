@@ -16,7 +16,10 @@ from . import netutils
 
 ALPHA = r"A-Za-z"
 DIGIT = r"0-9"
-SCHEME = rf"[{ALPHA}][{ALPHA}{DIGIT}+-.]*"
+# Dash LAST inside the class, deliberately: "+-." reads as the RANGE 0x2B-0x2E,
+# which also matches "," (0x2C) and "-" is then a range operator rather than a
+# literal. RFC 3986 scheme chars are ALPHA / DIGIT / "+" / "-" / "." only.
+SCHEME = rf"[{ALPHA}][{ALPHA}{DIGIT}+.-]*"
 PORT = rf"[{DIGIT}]*"
 NON_BREAKING = rf"[^:@/;]"
 AUTHORITY = (
