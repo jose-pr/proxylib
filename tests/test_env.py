@@ -123,6 +123,89 @@ def test_env_does_not_resolve_dns_without_local_entry(monkeypatch):
     assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
 
 
+def test_no_proxy_star_bypasses_everything():
+    # curl, requests.utils.should_bypass_proxies and the stdlib's
+    # proxy_bypass_environment all read a bare "*" as "bypass every host".
+    # This used to parse to a ("*", None) host entry that matched nothing,
+    # so a configured proxy was still returned.
+    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["*"])
+    assert cfg["https://example.com"] == [None]
+    assert cfg["http://10.1.2.3:8080"] == [None]
+
+
+def test_no_proxy_star_bypasses_even_with_no_proxy_configured():
+    # The wildcard is an explicit DIRECT decision, not "no opinion" -- it must
+    # not fall through to the KeyError an unconfigured scheme would give.
+    cfg = EnvProxyConfig(None, None, ["*"])
+    assert cfg["https://example.com"] == [None]
+
+
+def test_no_proxy_star_short_circuits_before_local_dns(monkeypatch):
+    # "<local>" resolves DNS; "*" makes that irrelevant, so a "<local>" entry
+    # ordered ahead of the wildcard must not still charge the lookup a
+    # blocking gethostbyname().
+    import proxylib.env as env
+
+    def boom(host):
+        raise AssertionError("DNS resolved despite a '*' NO_PROXY entry")
+
+    monkeypatch.setattr(env, "get_ip", boom)
+    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>", "*"])
+    assert cfg["http://example.com"] == [None]
+
+
+def test_no_proxy_star_entry_parses_to_the_wildcard_sentinel():
+    from proxylib.env import _WILDCARD, _parse_no_proxy_entry
+
+    assert _parse_no_proxy_entry("*") is _WILDCARD
+    assert _parse_no_proxy_entry(" * ") is _WILDCARD
+    # Only a bare "*" is the wildcard -- "*.example.com" stays a host entry
+    # (and keeps its old, unchanged behavior).
+    assert _parse_no_proxy_entry("*.example.com") != _WILDCARD
+
+
+def test_from_env_star_no_proxy(monkeypatch):
+    # Clear every casing before setting one: on Windows os.environ is
+    # case-insensitive, so a later delenv of the other casing would silently
+    # undo the setenv (see .agents/kb/testing.md).
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    monkeypatch.delenv("http_proxy", raising=False)
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy:80")
+    monkeypatch.setenv("NO_PROXY", "*")
+
+    cfg = EnvProxyConfig.from_env()
+    assert cfg["http://example.com"] == [None]
+    assert cfg["https://anything.internal"] == [None]
+
+
+def test_no_proxy_star_reaches_configurable_proxy_map():
+    # ConfigurableProxyMap doesn't reimplement bypass matching -- it delegates
+    # to an internal EnvProxyConfig(None, None, rules), so the wildcard has to
+    # work through that seam too.
+    from proxylib import ConfigurableProxyMap, SimpleProxyMap
+
+    cfg = ConfigurableProxyMap(SimpleProxyMap("http://proxy:80"), no_proxy=["*"])
+    assert list(cfg["https://example.com"]) == [None]
+
+
+def test_default_no_proxy_star_merges_into_configurable_proxy_map():
+    # The process-wide defaults are merged into the internal checker's rules,
+    # so a global "*" bypasses through ConfigurableProxyMap as well.
+    # NOTE: this constructs with bypass_local=True on purpose -- a bare
+    # ConfigurableProxyMap(map) builds no bypass checker at all and therefore
+    # consults no defaults. See
+    # .agents/findings/configurable_proxy_map_ignores_default_no_proxy.md.
+    from proxylib import ConfigurableProxyMap, SimpleProxyMap
+
+    set_default_no_proxy(["*"])
+    cfg = ConfigurableProxyMap(SimpleProxyMap("http://proxy:80"), bypass_local=True)
+    assert list(cfg["https://example.com"]) == [None]
+
+
 def test_from_env_reads_upper_and_lower_case(monkeypatch):
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)

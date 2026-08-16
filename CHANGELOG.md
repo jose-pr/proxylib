@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `NO_PROXY="*"` now bypasses the proxy for every host, matching curl,
+  `requests.utils.should_bypass_proxies` and the stdlib's
+  `urllib.request.proxy_bypass_environment`. It previously parsed to an ordinary
+  host entry that could never match a real hostname, so the common "stop
+  proxying everything right now" escape hatch silently did nothing. Works via
+  `NO_PROXY`/`no_proxy`, an explicit `EnvProxyConfig(..., no_proxy=["*"])`,
+  `ConfigurableProxyMap(no_proxy=["*"])`, and `set_default_no_proxy(["*"])`;
+  it is an explicit DIRECT result, so it applies even when no proxy is
+  configured for the scheme, and it is checked ahead of every other rule so it
+  never triggers a `<local>` DNS lookup.
+
 ### Fixed
 
 - Documentation drift that shipped in the wheel and rendered on the docs site:

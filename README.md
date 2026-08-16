@@ -29,7 +29,8 @@ Zero required runtime dependencies; a couple of optional extras unlock more (see
   bindings to its C API — no subprocess) is also available as a standalone `ProxyMap`
   you can use directly on any platform.
 - **Env var proxy config** — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (and lowercase
-  variants), with correct exact/subdomain `NO_PROXY` matching.
+  variants), with correct exact/subdomain `NO_PROXY` matching, plus CIDR entries,
+  `<local>`, and `*` (bypass everything) as curl and `requests` read them.
 - **PAC support** — the full Netscape PAC utility-function set (including
   `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions, runnable either
   as real JavaScript through a pluggable engine (`dukpy` or `quickjs`, picked via

@@ -12,7 +12,24 @@ from .proxy import URL, Proxy, ProxyMap, SimpleProxyMap
 __all__ = ("EnvProxyConfig", "set_default_no_proxy", "get_default_no_proxy")
 
 _NoProxyNetwork = Union["_ip.IPv4Network", "_ip.IPv6Network"]
-_NoProxyEntry = Union[Tuple[str, Optional[int]], _NoProxyNetwork, None]
+
+
+class _Wildcard:
+    """Sentinel for a bare ``*`` NO_PROXY entry: bypass the proxy for every host.
+
+    A distinct type rather than a ``("*", None)`` host entry, which is what
+    this used to parse to and could never match a real hostname (the host
+    matcher compares exact/dot-suffix only).
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<NO_PROXY *>"
+
+
+_WILDCARD = _Wildcard()
+_NoProxyEntry = Union[Tuple[str, Optional[int]], _NoProxyNetwork, _Wildcard, None]
 
 # Org-wide default NO_PROXY rules, consulted by every EnvProxyConfig (and
 # ConfigurableProxyMap's own no_proxy=) in addition to whatever's passed
@@ -36,11 +53,18 @@ def get_default_no_proxy() -> "List[str]":
 
 
 def _parse_no_proxy_entry(entry: str) -> _NoProxyEntry:
-    """Parse one NO_PROXY entry: ``None`` for ``<local>``, a network for CIDR
-    notation, or (host, port) with a leading '.' stripped otherwise."""
+    """Parse one NO_PROXY entry: ``None`` for ``<local>``, ``_WILDCARD`` for
+    ``*``, a network for CIDR notation, or (host, port) with a leading '.'
+    stripped otherwise."""
     entry = entry.strip()
     if not entry or entry == "<local>":
         return None
+    if entry == "*":
+        # curl, requests (should_bypass_proxies) and the stdlib
+        # (proxy_bypass_environment) all read a bare "*" as "bypass
+        # everything". Parsing it as a ("*", None) host entry instead --
+        # which is what this did before -- silently matched nothing.
+        return _WILDCARD
     if "/" in entry:
         # CIDR entry, e.g. "10.0.0.0/8" or "2001:db8::/32" -- parse the "/"
         # before the host:port split below, since IPv6 CIDRs contain ":"
@@ -72,7 +96,13 @@ def _no_proxy_matches(host: str, port: "int|None", entry: "Tuple[str, int|None]"
 
 
 class EnvProxyConfig(ProxyMap):
-    """A ``ProxyMap`` built from ``HTTP_PROXY``/``HTTPS_PROXY``/``NO_PROXY``-style settings."""
+    """A ``ProxyMap`` built from ``HTTP_PROXY``/``HTTPS_PROXY``/``NO_PROXY``-style settings.
+
+    ``no_proxy`` entries may be a hostname (exact or ``.``-suffix match, curl
+    convention), a CIDR network, ``<local>``, or ``*`` -- the last meaning
+    "bypass the proxy for every host", as curl, ``requests`` and the stdlib
+    all read it.
+    """
 
     __slots__ = ("http_proxy", "https_proxy", "no_proxy")
 
@@ -104,6 +134,13 @@ class EnvProxyConfig(ProxyMap):
 
     def __getitem__(self, url: str) -> Iterable[Optional[Proxy]]:
         uri = URL.from_str(url)
+        if _WILDCARD in self.no_proxy:
+            # Ahead of the loop, not inside it: "*" short-circuits every other
+            # rule, and testing it first means a "<local>" entry sitting earlier
+            # in the list can't charge this lookup a DNS round-trip that the
+            # wildcard was always going to make irrelevant. (Still after
+            # URL.from_str, so a malformed key raises ValueError either way.)
+            return [None]
         # Resolve DNS lazily: get_ip() is a blocking gethostbyname() call,
         # only needed for "<local>" entries -- don't pay it per lookup when
         # no_proxy has none (the overwhelmingly common case).
