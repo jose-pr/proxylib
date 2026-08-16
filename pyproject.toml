@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxylib"
-version = "1.0.1"
+version = "1.0.2"
 authors = [{ name = "Jose A" }]
 description = "Platform-agnostic proxy configuration: detect system/env proxy settings, evaluate PAC files (with WPAD discovery), and wire the result into requests or urllib"
 readme = "README.md"
