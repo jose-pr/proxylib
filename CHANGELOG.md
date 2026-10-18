@@ -53,6 +53,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   new `cache_maxsize=1024` keyword (least recently used dropped first).
 - `ConfigurableProxyMap` applies the `set_default_no_proxy()` rules even when
   built without `no_proxy=` or `bypass_local=`.
+- Windows: a WinHTTP answer listing several proxies (`p1:8080;p2:8080`) keeps
+  every applicable entry in order; only the first was used. `WinHttpProxyMap`
+  sets 10-second session timeouts, so a PAC fetch cannot hang on name
+  resolution.
+- macOS: an HTTPS proxy from `CFNetworkProxyMap` is returned as an `http://`
+  proxy. It is a plain proxy reached with `CONNECT`, and clients were trying to
+  speak TLS to it. An entry of an unknown type is skipped instead of meaning
+  DIRECT.
+- Linux: GNOME/MATE settings are re-read after 10 seconds instead of being
+  cached for the life of the process; a `kioslaverc` that is not UTF-8 counts
+  as not configured instead of raising; the `nmcli` path checks every active
+  connection, as the D-Bus path does.
+- `LibProxyMap` keeps one libproxy factory per map instead of building one per
+  lookup (which re-fetched the PAC every time), frees it in the new `close()`,
+  and treats a failed libproxy call as no opinion (`KeyError`) instead of
+  DIRECT.
+- `system_proxy()` and `auto_proxy()` raise `ValueError` for an unknown
+  `provider`; a typo used to fall back to `"python"` silently.
+- An IPv6 proxy host is bracketed in `Proxy.url` and `as_uri()`
+  (`http://[::1]:8080`).
 
 ## [1.0.2] - 2026-08-16
 

@@ -93,7 +93,8 @@ can't express "explicitly DIRECT", only set/absent).
   `str` return is a PAC URL the caller still needs to load. `provider="system"`:
   outsources to the OS's native engine (`WinHttpProxyMap`/`CFNetworkProxyMap`/
   `LibProxyMap`) instead — falls back to `"python"` on POSIX if libproxy's shared
-  library isn't loadable.
+  library isn't loadable. Any other `provider` raises `ValueError`. A WinHTTP answer
+  with several proxies keeps all of them, in order.
 - **`auto_proxy(provider="python", **urlopen_kwargs) -> ProxyMap`** — resolves the full
   effective config: `system_proxy(provider)` → if it's a PAC URL string, load it → if it
   signals "nothing configured" (the `"python"` provider only), fall back to WPAD
@@ -102,9 +103,10 @@ can't express "explicitly DIRECT", only set/absent).
 - **`LibProxyMap(lib=None)`** (`proxylib.os.posix.libproxy`, re-exported at top level) —
   a standalone `ProxyMap` using libproxy's C API directly via `ctypes` (no subprocess).
   Construct with no arguments to auto-detect the shared library. `__getitem__` raises
-  `KeyError` (not a construction-time error) if libproxy isn't available. Creates a
-  fresh `pxProxyFactory` per lookup (matches libproxy's own contract); usable directly
-  on any platform regardless of the OS dispatch above.
+  `KeyError` (not a construction-time error) if libproxy isn't available, and when
+  libproxy returns no answer. Keeps one `pxProxyFactory` per map, created on first
+  lookup and freed by `close()` (or garbage collection); usable directly on any
+  platform regardless of the OS dispatch above.
 
 ## PAC support (`proxylib.pac`)
 
