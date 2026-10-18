@@ -6,6 +6,7 @@ GNOME 2's), only the schema id differs.
 from __future__ import annotations
 
 import subprocess
+import time
 from typing import Dict, Tuple
 
 from ...env import EnvProxyConfig
@@ -15,9 +16,12 @@ from . import _which
 
 __all__ = ("read_desktop_proxy",)
 
-# schema -> {(schema_or_child, key): raw value}, memoized per base schema for
-# the process lifetime. clear_gsettings_cache() is the seam tests use.
-_recursive_cache: "Dict[str, Dict[Tuple[str, str], str]]" = {}
+# schema -> (monotonic timestamp, {(schema_or_child, key): raw value}). Kept
+# for _CACHE_TTL seconds so one lookup's many key reads share one subprocess
+# while a settings change still takes effect. clear_gsettings_cache() is the
+# seam tests use.
+_recursive_cache: "Dict[str, Tuple[float, Dict[Tuple[str, str], str]]]" = {}
+_CACHE_TTL = 10.0
 
 
 def clear_gsettings_cache() -> None:
@@ -54,8 +58,9 @@ def _parse_gsettings_recursive(output: str) -> "Dict[Tuple[str, str], str]":
 
 
 def _gsettings_list_recursively(schema: str) -> "Dict[Tuple[str, str], str]":
-    if schema in _recursive_cache:
-        return _recursive_cache[schema]
+    cached = _recursive_cache.get(schema)
+    if cached is not None and time.monotonic() - cached[0] < _CACHE_TTL:
+        return cached[1]
     values: "Dict[Tuple[str, str], str]" = {}
     gsettings = _which.which("gsettings")
     if gsettings:
@@ -70,7 +75,7 @@ def _gsettings_list_recursively(schema: str) -> "Dict[Tuple[str, str], str]":
             values = _parse_gsettings_recursive(result.stdout)
         except (OSError, subprocess.SubprocessError):
             values = {}
-    _recursive_cache[schema] = values
+    _recursive_cache[schema] = (time.monotonic(), values)
     return values
 
 

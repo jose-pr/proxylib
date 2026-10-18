@@ -36,7 +36,7 @@ def _read_proxy_settings() -> "Optional[configparser.SectionProxy]":
     parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(path, encoding="utf-8")
-    except (OSError, configparser.Error):
+    except (OSError, configparser.Error, UnicodeDecodeError):
         return None
     return parser["Proxy Settings"] if parser.has_section("Proxy Settings") else None
 

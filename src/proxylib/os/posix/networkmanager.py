@@ -49,18 +49,24 @@ def _proxy_settings_via_nmcli() -> "Optional[Dict[str, str]]":
     if not _which.which("nmcli"):
         return None
     active_uuids = [u.strip() for u in _nmcli_get("UUID", "connection", "show", "--active") if u.strip()]
-    if not active_uuids:
-        return None
-    fields = _nmcli_get(
-        "proxy.method,proxy.pac-url,proxy.pac-script", "connection", "show", active_uuids[0]
-    )
-    if len(fields) < 3:
-        return None
-    return {
-        "method": fields[0].strip(),
-        "pac-url": fields[1].strip(),
-        "pac-script": fields[2].strip(),
-    }
+    # Every active connection is checked, as the D-Bus path does: the proxy
+    # settings often live on a VPN connection that is not listed first.
+    first: "Optional[Dict[str, str]]" = None
+    for uuid in active_uuids:
+        fields = _nmcli_get(
+            "proxy.method,proxy.pac-url,proxy.pac-script", "connection", "show", uuid
+        )
+        if len(fields) < 3:
+            continue
+        settings = {
+            "method": fields[0].strip(),
+            "pac-url": fields[1].strip(),
+            "pac-script": fields[2].strip(),
+        }
+        if settings["method"] not in ("", "none"):
+            return settings
+        first = first or settings
+    return first
 
 
 # ---- dbus-send fallback -------------------------------------------------------

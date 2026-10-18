@@ -19,6 +19,7 @@ across threads).
 from __future__ import annotations
 
 import ctypes
+import threading
 from ctypes.util import find_library
 from typing import Iterable, Optional
 
@@ -67,39 +68,55 @@ class LibProxyMap(ProxyMap):
     Construct with no arguments to use the auto-detected shared library;
     ``__getitem__`` raises ``KeyError`` (like any other resolution failure)
     if libproxy isn't available, rather than erroring at construction time.
+
+    One libproxy factory is created on first lookup and kept, so its PAC and
+    configuration caches are reused; release it with :meth:`close` (garbage
+    collection does it too).
     """
 
-    __slots__ = ("_lib",)
+    __slots__ = ("_lib", "_factory", "_lock")
 
     def __init__(self, lib: "Optional[ctypes.CDLL]" = None) -> None:
         self._lib = lib if lib is not None else _get_libproxy()
+        self._factory = None
+        self._lock = threading.Lock()
+
+    def close(self) -> None:
+        with self._lock:
+            factory, self._factory = self._factory, None
+        if factory and self._lib is not None:
+            self._lib.px_proxy_factory_free(factory)
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except AttributeError:  # __init__ did not finish
+            pass
 
     def __getitem__(self, uri: str) -> "Iterable[Optional[Proxy]]":
         lib = self._lib
         if lib is None:
             raise KeyError(uri)
 
-        factory = lib.px_proxy_factory_new()
-        if not factory:
+        with self._lock:
+            if not self._factory:
+                self._factory = lib.px_proxy_factory_new()
+            if not self._factory:
+                raise KeyError(uri)
+            proxies_array = lib.px_proxy_factory_get_proxies(self._factory, uri.encode("utf-8"))
+        if not proxies_array:
+            # libproxy failed to answer, which is not a DIRECT decision.
             raise KeyError(uri)
         try:
-            proxies_array = lib.px_proxy_factory_get_proxies(factory, uri.encode("utf-8"))
-            if not proxies_array:
-                return [None]
-            try:
-                results: "list[Optional[Proxy]]" = []
-                i = 0
-                while proxies_array[i] is not None:
-                    entry = proxies_array[i].decode("utf-8")
-                    results.append(
-                        None if entry.startswith("direct://") else Proxy.from_str(entry)
-                    )
-                    i += 1
-                return results or [None]
-            finally:
-                lib.px_proxy_factory_free_proxies(proxies_array)
+            results: "list[Optional[Proxy]]" = []
+            i = 0
+            while proxies_array[i] is not None:
+                entry = proxies_array[i].decode("utf-8")
+                results.append(None if entry.startswith("direct://") else Proxy.from_str(entry))
+                i += 1
+            return results or [None]
         finally:
-            lib.px_proxy_factory_free(factory)
+            lib.px_proxy_factory_free_proxies(proxies_array)
 
 
 def detect() -> "Optional[LibProxyMap]":

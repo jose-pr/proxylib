@@ -749,9 +749,35 @@ def test_libproxymap_frees_proxies_array_and_factory():
     from proxylib import LibProxyMap
 
     fake = _FakeLibproxy(proxies=("direct://",))
-    LibProxyMap(fake)["http://example.com"]
-    assert len(fake.freed_proxies_arrays) == 1
+    proxymap = LibProxyMap(fake)
+    proxymap["http://example.com"]
+    proxymap["http://example.org"]
+    assert len(fake.freed_proxies_arrays) == 2
+    assert fake.freed_factories == []
+    proxymap.close()
     assert fake.freed_factories == [1234]
+
+
+def test_libproxymap_reuses_one_factory():
+    from proxylib import LibProxyMap
+
+    fake = _FakeLibproxy(proxies=("direct://",))
+    created = []
+    original = fake.px_proxy_factory_new
+    fake.px_proxy_factory_new = lambda: created.append(1) or original()
+    proxymap = LibProxyMap(fake)
+    for _ in range(3):
+        proxymap["http://example.com"]
+    assert created == [1]
+
+
+def test_libproxymap_null_answer_is_no_opinion():
+    from proxylib import LibProxyMap
+
+    fake = _FakeLibproxy()
+    fake.px_proxy_factory_get_proxies = lambda factory, url: None
+    with pytest.raises(KeyError):
+        LibProxyMap(fake)["http://example.com"]
 
 
 def test_libproxymap_raises_keyerror_when_factory_creation_fails():
@@ -773,3 +799,48 @@ def test_libproxymap_raises_keyerror_when_lib_unavailable(monkeypatch):
     with pytest.raises(KeyError):
         LibProxyMap(None)["http://example.com"]
     assert LibProxyMap(None).get("http://example.com", "fallback") == "fallback"
+
+
+def test_kde_non_utf8_kioslaverc_is_not_configured(monkeypatch, tmp_path):
+    import proxylib.os.posix.kde as kde
+
+    rc = tmp_path / "kioslaverc"
+    rc.write_bytes(b"[Proxy Settings]\nProxyType=1\nhttpProxy=http://caf\xe9 8080\n")
+    monkeypatch.setattr(kde, "_kioslaverc_path", lambda: rc)
+    assert kde._read_proxy_settings() is None
+
+
+def test_nmcli_uses_the_first_active_connection_with_a_proxy(monkeypatch):
+    import proxylib.os.posix.networkmanager as nm
+
+    replies = {
+        ("UUID", "connection", "show", "--active"): ["wired", "vpn", ""],
+        ("proxy.method,proxy.pac-url,proxy.pac-script", "connection", "show", "wired"): ["none", "", ""],
+        ("proxy.method,proxy.pac-url,proxy.pac-script", "connection", "show", "vpn"): [
+            "auto", "http://pac/x.pac", ""
+        ],
+    }
+    monkeypatch.setattr(nm._which, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(nm, "_nmcli_get", lambda *args: replies[args])
+    assert nm._proxy_settings_via_nmcli()["pac-url"] == "http://pac/x.pac"
+
+
+def test_gsettings_cache_expires(monkeypatch):
+    import proxylib.os.posix._gsettings as gs
+
+    calls = []
+    now = [1000.0]
+    monkeypatch.setattr(gs._which, "which", lambda name: "/usr/bin/gsettings")
+    monkeypatch.setattr(gs.time, "monotonic", lambda: now[0])
+
+    class Result:
+        stdout = "org.gnome.system.proxy mode 'manual'\n"
+
+    monkeypatch.setattr(gs.subprocess, "run", lambda *a, **k: calls.append(1) or Result())
+    gs.clear_gsettings_cache()
+    gs._gsettings_list_recursively("org.gnome.system.proxy")
+    gs._gsettings_list_recursively("org.gnome.system.proxy")
+    now[0] += gs._CACHE_TTL + 1
+    gs._gsettings_list_recursively("org.gnome.system.proxy")
+    assert len(calls) == 2
+    gs.clear_gsettings_cache()
