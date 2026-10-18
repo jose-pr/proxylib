@@ -1,4 +1,5 @@
 import http.server
+import socketserver
 import threading
 import time
 
@@ -25,14 +26,23 @@ class _Routes(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class LocalHTTPServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def server_bind(self):
+        # HTTPServer.server_bind asks socket.getfqdn() for a name, a reverse
+        # lookup that takes seconds on some CI runners.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 @pytest.fixture
 def http_server():
     """A real HTTP server on 127.0.0.1; ``server.route(path, body, status, delay)``
     adds a response and ``server.url(path)`` builds its URL."""
     handler = type("Handler", (_Routes,), {"routes": {}})
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    server = LocalHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     server.route = lambda path, body=b"", status=200, delay=0: handler.routes.__setitem__(
         path, (status, body, delay)
     )
