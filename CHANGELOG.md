@@ -32,6 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `pac.load()` downloads time out after 10 seconds unless `timeout=` is
   passed, refuse a body over 1 MiB (Chromium's limit) with `ValueError`, and
   decode a script that is not UTF-8 as Latin-1 instead of raising.
+- `PAC` and `JSProxyAutoConfig` are `ProxyMap`s, as the docs always said:
+  `isinstance(pac, ProxyMap)` is true and `with load_pac(...):` patches like any
+  other map, so `with auto_proxy():` no longer fails when a PAC is in effect.
+  `JSProxyAutoConfig.get()` no longer raises: it was being routed into the JS
+  engine.
+- A PAC result entry with an unknown keyword or no host (`"garbage"`,
+  `"PROXY "`) is skipped, and a result with nothing usable left — including an
+  empty string or a non-string return — means DIRECT, as in browsers. It
+  previously produced host-less `Proxy` objects or an empty list.
+- `PAC.shExpMatch` treats only `*` and `?` as wildcards and matches
+  case-sensitively on every platform, as Mozilla and Chromium do. It used
+  `fnmatch`, which is case-insensitive on Windows and reads `[...]` as a
+  character class.
+- `ProxyDict` treats a key its map cannot parse as a URL (`"http"`, `"all"`,
+  which `requests` looks up first) as missing. `requests.get(...,
+  proxies=ProxyDict(EnvProxyConfig.from_env()))` raised `ValueError`.
+- `ConfigurableProxyMap(cache_ttl=..., round_robin=True)` rotates on every
+  lookup; the cache had frozen the first rotation. The cache is bounded by the
+  new `cache_maxsize=1024` keyword (least recently used dropped first).
+- `ConfigurableProxyMap` applies the `set_default_no_proxy()` rules even when
+  built without `no_proxy=` or `bypass_local=`.
 
 ## [1.0.2] - 2026-08-16
 

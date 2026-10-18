@@ -20,7 +20,8 @@ can't express "explicitly DIRECT", only set/absent).
   (`scheme://[user[:pass]@]host[:port]`). `Proxy(scheme, username, password, host,
   port)` — **`Proxy("direct", ...)` returns `None`, not an instance** (the DIRECT
   sentinel). `scheme="proxy"` normalizes to `"http"`, `"socks"` to `"socks4"`, empty to
-  `"http"`. `.url` — `"{scheme}://{netloc}"`.
+  `"http"`. `.url` — `"{scheme}://{netloc}"` (no credentials; `as_uri()` includes them).
+  `repr()`/`str()` show `password='***'`, never the password.
 - **`ProxyMap`** — `runtime_checkable Protocol`, and a factory: `ProxyMap(src)` builds a
   `SimpleProxyMap` for a bare authority string, or loads `src` as a PAC source (via
   `pac.load()`) if it looks like a PAC file/URL (has a path beyond the authority, or is
@@ -36,14 +37,17 @@ can't express "explicitly DIRECT", only set/absent).
   opinion (not `KeyError`) wins. If every constituent raises `KeyError`, so does the
   chain — composes inside a larger chain.
 - **`ConfigurableProxyMap(proxymap, *, cache_ttl=None, probe=False, probe_timeout=5.0,
-  round_robin=False, browser_compatibility=False, bypass_local=False, no_proxy=None)`**
+  round_robin=False, browser_compatibility=False, bypass_local=False, no_proxy=None,
+  cache_maxsize=1024)`**
   — decorates any `ProxyMap` with independent opt-in features:
-  - `cache_ttl` (seconds, `None`/falsy disables) — per-effective-URL cache; `clear_cache()`.
+  - `cache_ttl` (seconds, `None`/falsy disables) — per-effective-URL cache of the
+    decorated map's answer, at most `cache_maxsize` URLs (least recently used dropped
+    first); `clear_cache()`.
   - `probe=True` — resolves to the first reachable entry via
     `netutils.first_working_proxy`; a `LookupError` (nothing reachable) becomes
     `KeyError` here, not a silent DIRECT.
-  - `round_robin=True` — rotates the result tuple each call so a different entry leads
-    while preserving the rest as fallback (thread-safe).
+  - `round_robin=True` — rotates the result tuple each call, cached or not, so a
+    different entry leads while preserving the rest as fallback (thread-safe).
   - `browser_compatibility=True` — strips path/query/fragment from HTTPS URLs before
     delegating and before computing the cache key (matches Chrome/Firefox PAC privacy
     behavior).
@@ -69,9 +73,14 @@ can't express "explicitly DIRECT", only set/absent).
   with (not overridden by) the process-wide default rules from `set_default_no_proxy()`.
   - **`EnvProxyConfig.from_env() -> EnvProxyConfig`** — reads `HTTP_PROXY`/`http_proxy`,
     `HTTPS_PROXY`/`https_proxy`, `NO_PROXY`/`no_proxy` (uppercase wins if both set).
+    Inside a CGI request (`REQUEST_METHOD` set) `HTTP_PROXY` is ignored (httpoxy); only an
+    exact lowercase `http_proxy` is read, and on Windows neither. An unparsable
+    `NO_PROXY` entry is skipped with a warning; abbreviated IPv4 CIDR (`169.254/16`) is
+    accepted.
 - **`set_default_no_proxy(rules)`** / **`get_default_no_proxy() -> list[str]`** —
-  process-wide default `NO_PROXY` rules consulted by every `EnvProxyConfig` (and
-  `ConfigurableProxyMap(no_proxy=...)`) in addition to whatever's passed explicitly.
+  process-wide default `NO_PROXY` rules consulted by every `EnvProxyConfig` and every
+  `ConfigurableProxyMap` (rules set when the map is built), in addition to whatever's
+  passed explicitly.
   `set_default_no_proxy(None)` clears it.
 
 ## System / auto detection (`proxylib.os`, re-exported at top level)
@@ -103,13 +112,19 @@ can't express "explicitly DIRECT", only set/absent).
   `myIpAddress`, `myIpAddressEx`, `dnsDomainLevels`, `isInNet`/`isInNetEx`,
   `isResolvable`/`isResolvableEx`, `dateRange`, `timeRange`, `shExpMatch`,
   `sortIpAddressList`, `getClientVersion`, ...) implementing the full Netscape PAC set
-  plus Microsoft's `*Ex` extensions. `FindProxyForURL` here always returns `"DIRECT"` —
+  plus Microsoft's `*Ex` extensions. A `ProxyMap` (so `isinstance`, `.get`, `in` and
+  `with` work). `shExpMatch` treats only `*` and `?` as wildcards and is
+  case-sensitive on every platform, as in browsers. Result entries with an unknown
+  keyword or no host are skipped; a result with nothing usable is `[None]` (DIRECT).
+  `FindProxyForURL` here always returns `"DIRECT"` —
   subclass and override it, or use `JSProxyAutoConfig`, to actually select proxies.
   `dnsResolve(host, cache_ttl=30.0)` — per-host cached; `cache_ttl=0`/`None` forces a
   fresh lookup.
 - **`JSProxyAutoConfig`** (only defined if a JS engine is installed, else `None`) — a
   `PAC` subclass whose `FindProxyForURL` (and the utility functions) run as real
-  JavaScript against whichever engine `pac.engines.get_engine_class()` picks. Which
+  JavaScript against whichever engine `pac.engines.get_engine_class()` picks; calls
+  into the engine are serialised per instance, so one map is safe to share between
+  threads. Which
   engine: the `PROXYLIB_JS_ENGINE` env var, a **comma-separated** priority list (e.g.
   `"dukpy,quickjs"`); unset defaults to `("quickjs", "dukpy")`. `proxylib[jspac]`
   installs plain `dukpy`; `proxylib[quickjs]` installs `quickjs`/`quickjs-ng` depending
@@ -119,14 +134,17 @@ can't express "explicitly DIRECT", only set/absent).
   source (detected via a `"FindProxyForURL("` substring check). Without a JS engine
   installed, warns and returns an always-DIRECT `PAC()`. Genuine network downloads
   (not `file:`/inline) are cached per URL for `cache_ttl` seconds; `cache_ttl=0`/`None`
-  forces a fresh fetch. Raises `ValueError` if the fetched/read source has no
+  forces a fresh fetch. A download times out after 10 s unless `timeout=` is passed;
+  a body over 1 MiB raises `ValueError`; a non-UTF-8 body is decoded as Latin-1.
+  Raises `ValueError` if the fetched/read source has no
   `FindProxyForURL`. The fetch **bypasses any configured proxy** (chicken-and-egg
   avoidance, matches browser PAC-fetch behavior).
 - **`clear_download_cache()`** / **`clear_dns_cache()`** — test/cache-busting seams.
 - **`discover(fqdn=None, timeout=3.0, cache_ttl=300.0, **urllib_kwds) -> PAC | None`**
   (`proxylib.pac.wpad`, top-level alias: `proxylib.discover_pac`) — DNS+HTTP WPAD
   discovery: tries `http://wpad.<domain>/wpad.dat` for each parent domain of `fqdn`
-  (default: this host's FQDN), most-specific first, skipping the bare TLD. Returns the
+  (default: this host's FQDN), most-specific first, stopping before a public suffix
+  (a bare TLD or a ccTLD registry level such as `co.uk`). Returns the
   first successfully loaded `PAC`, or `None`. Results (including "not found") are
   cached per fqdn for `cache_ttl` seconds. **DHCP option 252 discovery is not
   implemented** (no portable stdlib path to OS DHCP lease data) — DNS+HTTP only.
@@ -165,7 +183,8 @@ can't express "explicitly DIRECT", only set/absent).
   `ProxyMap` (`__getitem__` returns `str`, an LSP violation if it were a `ProxyMap`
   subclass). Lookups are by scheme/host only, not the full URL — path-dependent
   PAC/`NO_PROXY` rules won't apply; use `ProxyMapAdapter`/`ProxyMapHandler` when that
-  fidelity matters. DIRECT raises `KeyError` (dict convention: missing key = no proxy).
+  fidelity matters. DIRECT raises `KeyError` (dict convention: missing key = no proxy),
+  and so does a key the map cannot parse as a URL (`"http"`, `"all"`).
   `.setdefault(url, value)` is a no-op (requests calls it to merge env proxies; the
   `ProxyMap` wins).
 
