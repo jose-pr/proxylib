@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-18
+
+### Added
+
+- `ConfigurableProxyMap(cache_maxsize=1024)` bounds the per-URL cache (least
+  recently used dropped first).
+- `LibProxyMap.close()` frees the libproxy factory the map now keeps.
+- `PAC` and `JSProxyAutoConfig` are `ProxyMap`s, so they gain the protocol's
+  `with` support (see Fixed).
+
 ### Security
 
 - `EnvProxyConfig.from_env()` ignores `HTTP_PROXY` inside a CGI request
@@ -362,7 +372,8 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jose-pr/proxylib/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/jose-pr/proxylib/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/jose-pr/proxylib/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jose-pr/proxylib/releases/tag/v1.0.0
