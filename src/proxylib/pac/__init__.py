@@ -433,7 +433,9 @@ def load(url: str, cache_ttl: "_Optional[float]" = 300.0, **urllib_kwds) -> PAC:
             url = "https://" + url
 
     if js is None:
-        from_network = True
+        # A file:// URL is read through urllib too, but it is as cheap to
+        # re-read as a file: path, so it is not cached either.
+        from_network = not url.lower().startswith("file:")
         if cache_ttl:
             cached = _download_cache.get(url)
             if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:

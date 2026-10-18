@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `provider`; a typo used to fall back to `"python"` silently.
 - An IPv6 proxy host is bracketed in `Proxy.url` and `as_uri()`
   (`http://[::1]:8080`).
+- `pac.load()` no longer caches a `file://` URL, as documented for file
+  sources.
+- Public annotations resolve with `typing.get_type_hints` on Python 3.9; they
+  were written as `"X|None"` strings, which 3.9 cannot evaluate.
 
 ## [1.0.2] - 2026-08-16
 
