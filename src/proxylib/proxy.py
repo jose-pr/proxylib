@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 import time
 import typing
+from collections import OrderedDict
 from typing import Dict, Iterable, Optional, Protocol, Sequence, Tuple, Union, runtime_checkable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -230,6 +231,11 @@ class ConfigurableProxyMap(ProxyMap):
 
     All features are opt-in and independent; the decorated map's own result
     contract (``KeyError``/``[None]``/``[Proxy]``) is preserved throughout.
+
+    The cache holds the decorated map's answer for at most ``cache_maxsize``
+    URLs (least recently used dropped first); round-robin rotation applies to
+    every lookup, cached or not. The process-wide ``set_default_no_proxy()``
+    rules apply whenever they are set when the map is built.
     """
 
     def __init__(
@@ -243,9 +249,11 @@ class ConfigurableProxyMap(ProxyMap):
         browser_compatibility: bool = False,
         bypass_local: bool = False,
         no_proxy: "Iterable[str]|None" = None,
+        cache_maxsize: int = 1024,
     ) -> None:
         self.proxymap = proxymap
         self.cache_ttl = cache_ttl
+        self.cache_maxsize = cache_maxsize
         self.probe = probe
         self.probe_timeout = probe_timeout
         self.round_robin = round_robin
@@ -265,18 +273,44 @@ class ConfigurableProxyMap(ProxyMap):
             # netutils.is_loopback_or_link_local for that) plus same-subnet
             # addresses -- a superset of what bypass_local asks for.
             bypass_rules.append("<local>")
-        self._bypass_checker: "Optional[ProxyMap]" = None
-        if bypass_rules:
-            from .env import EnvProxyConfig
+        from .env import EnvProxyConfig, get_default_no_proxy
 
+        self._bypass_checker: "Optional[ProxyMap]" = None
+        if bypass_rules or get_default_no_proxy():
             self._bypass_checker = EnvProxyConfig(None, None, bypass_rules)
 
-        self._cache: "Dict[str, Tuple[float, tuple]]" = {}
+        # url -> (monotonic timestamp, decoded answer, probed answer or None);
+        # the probed answer is only kept when round-robin is off, since a
+        # rotated list must be probed in its new order.
+        self._cache: "OrderedDict[str, Tuple[float, tuple, Optional[tuple]]]" = OrderedDict()
         self._round_robin_index = 0
         self._lock = threading.Lock()
 
     def clear_cache(self) -> None:
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
+
+    def _cache_get(self, url: str) -> "Optional[Tuple[float, tuple, Optional[tuple]]]":
+        if not self.cache_ttl:
+            return None
+        with self._lock:
+            cached = self._cache.get(url)
+            if cached is None:
+                return None
+            if time.monotonic() - cached[0] >= self.cache_ttl:
+                del self._cache[url]
+                return None
+            self._cache.move_to_end(url)
+            return cached
+
+    def _cache_put(self, url: str, result: tuple, probed: "Optional[tuple]") -> None:
+        if not self.cache_ttl:
+            return
+        with self._lock:
+            self._cache[url] = (time.monotonic(), result, probed)
+            self._cache.move_to_end(url)
+            while len(self._cache) > max(self.cache_maxsize, 1):
+                self._cache.popitem(last=False)
 
     def _effective_url(self, url: str) -> str:
         """Apply browser-style privacy stripping: for HTTPS, strip the
@@ -299,29 +333,31 @@ class ConfigurableProxyMap(ProxyMap):
 
         effective_url = self._effective_url(url)
 
-        if self.cache_ttl:
-            cached = self._cache.get(effective_url)
-            if cached is not None and (time.monotonic() - cached[0]) < self.cache_ttl:
-                return cached[1]
+        cached = self._cache_get(effective_url)
+        if cached is not None and cached[2] is not None:
+            return cached[2]
+        result: tuple = cached[1] if cached is not None else tuple(self.proxymap[effective_url])
 
-        result: tuple = tuple(self.proxymap[effective_url])
-
-        if self.round_robin and len(result) > 1:
+        answer = result
+        if self.round_robin and len(answer) > 1:
             with self._lock:
-                index = self._round_robin_index % len(result)
+                index = self._round_robin_index % len(answer)
                 self._round_robin_index += 1
-            result = result[index:] + result[:index]
+            answer = answer[index:] + answer[:index]
 
+        probed: "Optional[tuple]" = None
         if self.probe:
             try:
-                result = (first_working_proxy(result, timeout=self.probe_timeout),)
+                answer = (first_working_proxy(answer, timeout=self.probe_timeout),)
             except LookupError:
                 # No candidate was reachable -- a resolution failure, not a
                 # DIRECT decision (same reasoning as LibProxyMap/
                 # CFNetworkProxyMap's timeout/failure handling).
                 raise KeyError(url)
+            if not self.round_robin:
+                probed = answer
 
-        if self.cache_ttl:
-            self._cache[effective_url] = (time.monotonic(), result)
+        if cached is None or probed is not None:
+            self._cache_put(effective_url, result, probed)
 
-        return result
+        return answer

@@ -361,3 +361,33 @@ def test_proxy_repr_and_str_mask_the_password():
     assert "password='***'" in repr(proxy)
     assert proxy.as_uri() == "http://alice:s3cret@proxy:8080"
     assert "password=''" in repr(Proxy.from_str("http://proxy:8080"))
+
+
+def test_configurable_round_robin_rotates_cached_results():
+    m = ConfigurableProxyMap(
+        SimpleProxyMap("PROXY a:1; PROXY b:1; PROXY c:1"), cache_ttl=60, round_robin=True
+    )
+    assert [list(m["http://x/"])[0].host for _ in range(4)] == ["a", "b", "c", "a"]
+
+
+def test_configurable_cache_is_bounded_and_drops_least_recent():
+    calls = []
+
+    class Counting:
+        def __getitem__(self, url):
+            calls.append(url)
+            return [None]
+
+    m = ConfigurableProxyMap(Counting(), cache_ttl=60, cache_maxsize=2)
+    m["http://a/"], m["http://b/"], m["http://a/"], m["http://c/"]
+    assert len(m._cache) == 2
+    m["http://a/"]
+    m["http://b/"]
+    assert calls == ["http://a/", "http://b/", "http://c/", "http://b/"]
+
+
+def test_configurable_applies_default_no_proxy_without_explicit_rules():
+    set_default_no_proxy(["internal.test"])
+    m = ConfigurableProxyMap(SimpleProxyMap("PROXY a:1"))
+    assert m["http://internal.test/"] == [None]
+    assert list(m["http://other.test/"])[0].host == "a"
