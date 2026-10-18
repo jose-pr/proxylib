@@ -6,7 +6,7 @@ requests = pytest.importorskip("requests")
 
 
 def test_proxydict_returns_uri_for_proxy():
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy:8080"))
     pd = ProxyDict(proxymap)
     assert pd["http://example.com"] == "http://proxy:8080"
 
@@ -18,7 +18,7 @@ def test_proxydict_raises_keyerror_for_direct():
 
 
 def test_proxydict_copy():
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy:8080"))
     pd = ProxyDict(proxymap)
     copy = pd.copy()
     assert copy is not pd
@@ -65,7 +65,7 @@ def _session_with(adapter):
 
 
 def test_proxy_map_adapter_injects_resolved_proxy(captured_send):
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy:8080"))
     session = _session_with(ProxyMapAdapter(proxymap))
 
     session.get("http://example.com", proxies={})
@@ -90,7 +90,7 @@ def test_proxy_map_adapter_explicit_proxy_at_same_key_takes_precedence(captured_
     # a less-specific key (bare "http") no longer does, since a per-request
     # ProxyMap decision is more specific by definition (see the class
     # docstring and the env-precedence test below).
-    proxymap = SimpleProxyMap(Proxy.from_str("http://autoproxy:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://autoproxy:8080"))
     session = _session_with(ProxyMapAdapter(proxymap))
 
     session.get("http://example.com", proxies={"http://example.com": "http://explicit:9999"})
@@ -124,7 +124,7 @@ def test_proxy_map_adapter_wins_over_env_proxy_when_trust_env(monkeypatch, captu
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
     monkeypatch.delenv("NO_PROXY", raising=False)
 
-    proxymap = SimpleProxyMap(Proxy.from_str("http://from-proxymap:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://from-proxymap:8080"))
     session = requests.Session()
     session.trust_env = True
     session.mount("http://", ProxyMapAdapter(proxymap))

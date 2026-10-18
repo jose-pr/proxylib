@@ -112,9 +112,9 @@ class LibProxyMap(ProxyMap):
             i = 0
             while proxies_array[i] is not None:
                 entry = proxies_array[i].decode("utf-8")
-                results.append(None if entry.startswith("direct://") else Proxy.from_str(entry))
+                results.append(None if entry.startswith("direct://") else Proxy.parse(entry))
                 i += 1
-            return results or [None]
+            return tuple(results) or (None,)
         finally:
             lib.px_proxy_factory_free_proxies(proxies_array)
 

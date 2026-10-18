@@ -29,7 +29,7 @@ def time_restricted():
 
 def test_time_restricted_intranet_always_direct(time_restricted):
     # Deterministic regardless of current date/time/weekday.
-    assert time_restricted["https://build.intranet.example.com/"] == [None]
+    assert time_restricted["https://build.intranet.example.com/"] == (None,)
 
 
 def test_time_restricted_external_host_does_not_crash(time_restricted):
@@ -37,7 +37,7 @@ def test_time_restricted_external_host_does_not_crash(time_restricted):
     # the actual outcome depends on when the test runs, so just check it
     # resolves to a well-formed result (DIRECT, or a PROXY;DIRECT chain).
     result = time_restricted["https://example.com/"]
-    assert isinstance(result, list) and len(result) >= 1
+    assert isinstance(result, tuple) and len(result) >= 1
     assert result[-1] is None  # every branch ends in a DIRECT fallback
     assert all(p is None or isinstance(p, Proxy) for p in result)
 
@@ -51,8 +51,8 @@ def enterprise():
 
 
 def test_enterprise_internal_domain_is_direct(enterprise):
-    assert enterprise["https://build.corp.example.com/"] == [None]
-    assert enterprise["https://plainhost/"] == [None]
+    assert enterprise["https://build.corp.example.com/"] == (None,)
+    assert enterprise["https://plainhost/"] == (None,)
 
 
 def test_enterprise_shexpmatch_routes_by_destination(enterprise):
@@ -83,7 +83,7 @@ def ms_extensions():
 
 
 def test_ms_extensions_plain_hostname_is_direct(ms_extensions):
-    assert ms_extensions["https://plainhost/"] == [None]
+    assert ms_extensions["https://plainhost/"] == (None,)
 
 
 def test_ms_extensions_unresolvable_host_hits_fallback(ms_extensions):
@@ -99,5 +99,5 @@ def test_ms_extensions_resolvable_host_exercises_ex_functions(ms_extensions):
     # localhost resolves in any environment -- reaches sortIpAddressList,
     # dnsResolveEx, isInNetEx, and myIpAddressEx.
     result = ms_extensions["https://localhost/"]
-    assert isinstance(result, list) and len(result) >= 1
+    assert isinstance(result, tuple) and len(result) >= 1
     assert all(p is None or isinstance(p, Proxy) for p in result)

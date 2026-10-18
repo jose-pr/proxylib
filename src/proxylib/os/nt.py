@@ -15,10 +15,11 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
+from urllib.parse import urlsplit
 
 from ..env import EnvProxyConfig
 from ..pac.wpad import discover as _wpad_discover
-from ..proxy import URL, Proxy, ProxyMap, SimpleProxyMap
+from ..proxy import Proxy, ProxyMap, SimpleProxyMap
 
 __all__ = ("system_proxy", "WinHttpProxyMap")
 
@@ -230,7 +231,7 @@ def _resolve_for_scheme(url: str, proxy_str: str) -> "List[Proxy]":
     scheme apply; with none of those, the http entries and then the https
     ones are used, as before.
     """
-    scheme = URL.from_str(url).scheme
+    scheme = urlsplit(url).scheme
     entries: "List[Tuple[str, str]]" = []
     for token in proxy_str.replace(";", " ").split():
         protocol, sep, server = token.partition("=")
@@ -241,7 +242,7 @@ def _resolve_for_scheme(url: str, proxy_str: str) -> "List[Proxy]":
     for wanted in ((scheme, ""), ("http",), ("https",)):
         selected = [server for protocol, server in entries if protocol in wanted]
         if selected:
-            return [Proxy.from_str(_as_url(server)) for server in selected]
+            return [Proxy.parse(server) for server in selected]
     return []
 
 
@@ -300,12 +301,12 @@ class WinHttpProxyMap(ProxyMap):
                 )
             if ok:
                 if not proxy:
-                    return [None]
-                return _resolve_for_scheme(url, proxy) or [None]
+                    return (None,)
+                return tuple(_resolve_for_scheme(url, proxy)) or (None,)
             # WinHttpGetProxyForUrl failed (e.g. ERROR_WINHTTP_AUTODETECTION_FAILED)
             # -- fall through to the static manual-proxy fallback below.
 
         manual = _manual_proxy_map(ie) if ie else None
         if manual is not None:
             return manual[url]
-        return [None]
+        return (None,)

@@ -5,7 +5,9 @@ libraries accept, resolving from a ``ProxyMap``.
 
 from __future__ import annotations
 
-from ..proxy import ProxyMap
+from urllib.parse import urlsplit
+
+from ..proxy import ProxyMap, lookup
 
 __all__ = ("ProxyDict",)
 
@@ -37,16 +39,18 @@ class ProxyDict:
         self.proxymap = proxymap
 
     def __getitem__(self, uri: str) -> str:
+        # requests also asks for bare keys such as "http" or "all": a key
+        # that is not a URL with a scheme and a host has no entry.
+        parts = urlsplit(uri) if isinstance(uri, str) else None
+        if parts is None or not parts.scheme or not parts.netloc:
+            raise KeyError(uri)
         try:
-            proxy = next(iter(self.proxymap[uri]))
-        except (StopIteration, ValueError):
-            # requests also asks for bare keys such as "http" or "all"; a map
-            # that only understands full URLs raises ValueError for those,
-            # and in a proxies dict that means "no entry", not an error.
+            proxy = lookup(self.proxymap, uri)[0]
+        except ValueError:
             raise KeyError(uri) from None
         if proxy is None:
             raise KeyError(uri)
-        return proxy.as_uri()
+        return proxy.uri()
 
     def get(self, uri: str, default=None):
         try:

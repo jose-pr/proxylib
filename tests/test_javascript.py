@@ -97,7 +97,7 @@ def test_jsproxyautoconfig_runs_utility_functions_from_js():
     }
     """
     pac = JSProxyAutoConfig(js)
-    assert pac["http://plain/"] == [None]
+    assert pac["http://plain/"] == (None,)
     proxies = pac["http://sub.example.com/"]
     assert proxies[0].host == "wcg1.example.com"
 
@@ -110,7 +110,7 @@ def test_jsproxyautoconfig_can_call_ms_extension_functions():
     }
     """
     pac = JSProxyAutoConfig(js)
-    assert pac["http://example.com/"] == [None]
+    assert pac["http://example.com/"] == (None,)
 
 
 def test_jsproxyautoconfig_dns_domain_levels_and_convert_addr_and_local_host():
@@ -131,7 +131,7 @@ def test_jsproxyautoconfig_dns_domain_levels_and_convert_addr_and_local_host():
     }
     """
     pac = JSProxyAutoConfig(js)
-    assert pac["http://sub.example.com/"] == [None]
+    assert pac["http://sub.example.com/"] == (None,)
 
 
 def _hammer(pac, threads=8, lookups=200):
@@ -171,10 +171,9 @@ def test_jsproxyautoconfig_is_safe_to_share_between_threads_on_quickjs(monkeypat
     assert _hammer(JSProxyAutoConfig(_THREADED_PAC)) == []
 
 
-def test_jsproxyautoconfig_get_and_in_answer_in_python():
-    from proxylib import ProxyMap
+def test_jsproxyautoconfig_is_a_proxymap():
+    from proxylib import ProxyMap, lookup
 
     pac = JSProxyAutoConfig('function FindProxyForURL(u, h) { return "PROXY a:1"; }')
     assert isinstance(pac, ProxyMap)
-    assert pac.get("http://x/")[0].host == "a"
-    assert "http://x/" in pac
+    assert lookup(pac, "http://x/")[0].host == "a"

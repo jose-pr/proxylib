@@ -17,9 +17,29 @@ Work toward 2.0, which breaks the 1.x API.
   top level. None of them is a `KeyError`, which keeps meaning "no opinion".
 - `proxylib.clear_caches()` drops every module-level cache in one call.
 - `proxylib.__all__` declares the public surface.
+- `lookup(proxymap, url)` reads any proxy map's answer as a tuple of `Proxy` or
+  `None` (DIRECT). It accepts every answer shape: `None`, a `Proxy`, a proxy URL,
+  a PAC result string, any object with a `url` attribute, or an iterable of
+  those; an empty answer is DIRECT. A plain mapping is also asked with the keys
+  `requests` uses (`scheme://host`, `scheme`, `all://host`, `all`).
+- `from_source(value)` builds a proxy map from a configured value without I/O;
+  a PAC location is loaded on its first lookup.
+- `Proxy.parse(text)` and `Proxy.parse_pac_result(text)`, and the `ProxyLike` /
+  `ProxyAnswer` type aliases.
 
 ### Changed
 
+- `ProxyMap` is a structural protocol with only `__getitem__`: a plain `dict`,
+  or any object indexable by URL, is a proxy map. `get()`, `in`, the
+  `ProxyMap(src)` factory (use `from_source`) and the context manager (use
+  `patch()`/`unpatch()`) are gone.
+- `Proxy` is an immutable value class, `Proxy(scheme, host, port=None,
+  username=None, password=None)`; absent port and credentials are `None`
+  (1.x: `0` and `""`). `as_uri()` is now `uri()` and percent-encodes the
+  credentials; `Proxy("direct", ...)` no longer returns `None`.
+- Built-in maps return tuples. A malformed proxy or request URL raises
+  `ProxyParseError` (a `ValueError`). Bracketed IPv6 hosts parse
+  (`http://[::1]:8080`), and a scheme-less `host:port` is an `http` proxy.
 - proxylib now depends on `netimps>=0.4.0,<0.5` for host:port handling, local
   interfaces (real prefix lengths on every OS, no extra needed), bounded name
   lookups and TCP probes. `import proxylib` imports neither it nor `requests`.
@@ -34,6 +54,8 @@ Work toward 2.0, which breaks the 1.x API.
 
 ### Removed
 
+- `UriSplit`, `Proxy.from_str`, `Proxy.find_all` and `Proxy.as_uri`: use
+  `Proxy.parse`, `Proxy.parse_pac_result` and `Proxy.uri`.
 - `proxylib.netutils` and the top-level `first_working_proxy`; use
   `ConfigurableProxyMap(probe=True)` for reachability probing.
 

@@ -98,7 +98,7 @@ def test_posix_system_proxy_backend_order_gnome_before_mate(monkeypatch):
     )
 
     result = posix.system_proxy()
-    assert list(result["http://example.com"]) == [Proxy.from_str("http://gnome-proxy:80")]
+    assert list(result["http://example.com"]) == [Proxy.parse("http://gnome-proxy:80")]
 
 
 # ---- gsettings batching (list-recursively) ------------------------------------
@@ -338,9 +338,9 @@ def test_gnome_manual(monkeypatch):
     result = gnome.detect()
     assert isinstance(result, EnvProxyConfig)
     assert list(result["http://example.com"]) == [
-        Proxy.from_str("http://proxy.example.com:8080")
+        Proxy.parse("http://proxy.example.com:8080")
     ]
-    assert result["http://localhost"] == [None]
+    assert result["http://localhost"] == (None,)
 
 
 def test_mate_manual(monkeypatch):
@@ -362,7 +362,7 @@ def test_mate_manual(monkeypatch):
     result = mate.detect()
     assert isinstance(result, EnvProxyConfig)
     assert list(result["http://example.com"]) == [
-        Proxy.from_str("http://mate-proxy.example.com:3128")
+        Proxy.parse("http://mate-proxy.example.com:3128")
     ]
 
 
@@ -405,9 +405,9 @@ def test_kde_manual(tmp_path, monkeypatch):
     result = kde.detect()
     assert isinstance(result, EnvProxyConfig)
     assert list(result["http://example.com"]) == [
-        Proxy.from_str("http://proxy.example.com:8080")
+        Proxy.parse("http://proxy.example.com:8080")
     ]
-    assert result["http://localhost"] == [None]
+    assert result["http://localhost"] == (None,)
 
 
 def test_kde_pac_script(tmp_path, monkeypatch):
@@ -726,7 +726,7 @@ def test_libproxymap_parses_direct():
     from proxylib import LibProxyMap
 
     fake = _FakeLibproxy(proxies=("direct://",))
-    assert LibProxyMap(fake)["http://example.com"] == [None]
+    assert LibProxyMap(fake)["http://example.com"] == (None,)
 
 
 def test_libproxymap_parses_proxy_url():
@@ -734,7 +734,7 @@ def test_libproxymap_parses_proxy_url():
 
     fake = _FakeLibproxy(proxies=("http://proxy.example.com:8080/",))
     result = LibProxyMap(fake)["http://example.com"]
-    assert list(result) == [Proxy.from_str("http://proxy.example.com:8080")]
+    assert list(result) == [Proxy.parse("http://proxy.example.com:8080")]
 
 
 def test_libproxymap_parses_multiple_fallback_proxies():
@@ -742,7 +742,7 @@ def test_libproxymap_parses_multiple_fallback_proxies():
 
     fake = _FakeLibproxy(proxies=("http://p1:80/", "http://p2:80/", "direct://"))
     result = list(LibProxyMap(fake)["http://example.com"])
-    assert result == [Proxy.from_str("http://p1:80"), Proxy.from_str("http://p2:80"), None]
+    assert result == [Proxy.parse("http://p1:80"), Proxy.parse("http://p2:80"), None]
 
 
 def test_libproxymap_frees_proxies_array_and_factory():
@@ -798,7 +798,6 @@ def test_libproxymap_raises_keyerror_when_lib_unavailable(monkeypatch):
     monkeypatch.setattr(libproxy, "_libproxy", None)
     with pytest.raises(KeyError):
         LibProxyMap(None)["http://example.com"]
-    assert LibProxyMap(None).get("http://example.com", "fallback") == "fallback"
 
 
 def test_kde_non_utf8_kioslaverc_is_not_configured(monkeypatch, tmp_path):

@@ -385,7 +385,7 @@ def _resolve_proxies_for_url(url: str, deadline: float = 5.0) -> "Optional[List[
                                 results.append(pac_extra if pac_kind == "proxy" else None)
                     finally:
                         cf.CFRelease(pac_array)
-                return results or [None]
+                return tuple(results) or (None,)
             finally:
                 cf.CFRelease(proxies)
         finally:
@@ -423,4 +423,4 @@ class CFNetworkProxyMap(ProxyMap):
         entries = _resolve_proxies_for_url(url, self.deadline)
         if entries is None:
             raise KeyError(url)
-        return [Proxy.from_str(entry) if entry else None for entry in entries]
+        return tuple(Proxy.parse(entry) if entry else None for entry in entries) or (None,)

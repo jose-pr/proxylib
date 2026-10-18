@@ -152,8 +152,8 @@ def test_nt_system_proxy_manual_proxy_all_protocols(monkeypatch):
 
     result = nt.system_proxy()
     assert isinstance(result, EnvProxyConfig)
-    assert list(result["http://example.com"]) == [Proxy.from_str("http://proxy.example.com:8080")]
-    assert result["http://localhost"] == [None]
+    assert list(result["http://example.com"]) == [Proxy.parse("http://proxy.example.com:8080")]
+    assert result["http://localhost"] == (None,)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows WinHTTP backend")
@@ -168,8 +168,8 @@ def test_nt_system_proxy_manual_proxy_per_protocol(monkeypatch):
     )
 
     result = nt.system_proxy()
-    assert list(result["http://example.com"]) == [Proxy.from_str("http://h:80")]
-    assert list(result["https://example.com"]) == [Proxy.from_str("http://s:443")]
+    assert list(result["http://example.com"]) == [Proxy.parse("http://h:80")]
+    assert list(result["https://example.com"]) == [Proxy.parse("http://s:443")]
 
 
 # ---- WinHttpProxyMap (WinHttpGetProxyForUrl) ----------------------------------
@@ -201,7 +201,7 @@ class TestWinHttpProxyMap:
 
         m = nt.WinHttpProxyMap()
         try:
-            assert m["http://example.com"] == [None]
+            assert m["http://example.com"] == (None,)
         finally:
             m.close()
 
@@ -216,7 +216,7 @@ class TestWinHttpProxyMap:
 
         m = nt.WinHttpProxyMap()
         try:
-            assert list(m["http://example.com"]) == [Proxy.from_str("http://proxy.example.com:8080")]
+            assert list(m["http://example.com"]) == [Proxy.parse("http://proxy.example.com:8080")]
         finally:
             m.close()
 
@@ -228,7 +228,7 @@ class TestWinHttpProxyMap:
 
         m = nt.WinHttpProxyMap()
         try:
-            assert m["http://example.com"] == [None]
+            assert m["http://example.com"] == (None,)
         finally:
             m.close()
 
@@ -249,7 +249,7 @@ class TestWinHttpProxyMap:
 
         m = nt.WinHttpProxyMap()
         try:
-            assert list(m["http://example.com"]) == [Proxy.from_str("http://proxy.example.com:8080")]
+            assert list(m["http://example.com"]) == [Proxy.parse("http://proxy.example.com:8080")]
         finally:
             m.close()
         assert calls == [False, True]
@@ -268,7 +268,7 @@ class TestWinHttpProxyMap:
 
         m = nt.WinHttpProxyMap()
         try:
-            assert list(m["http://example.com"]) == [Proxy.from_str("http://proxy.example.com:8080")]
+            assert list(m["http://example.com"]) == [Proxy.parse("http://proxy.example.com:8080")]
         finally:
             m.close()
 
@@ -280,7 +280,7 @@ class TestWinHttpProxyMap:
 
         m = nt.WinHttpProxyMap()
         try:
-            assert m["http://example.com"] == [None]
+            assert m["http://example.com"] == (None,)
         finally:
             m.close()
 
@@ -366,7 +366,7 @@ def test_cfnetworkproxymap_direct(monkeypatch):
 
     monkeypatch.setattr(darwin, "_resolve_proxies_for_url", lambda url, deadline: [None])
 
-    assert darwin.CFNetworkProxyMap()["http://example.com"] == [None]
+    assert darwin.CFNetworkProxyMap()["http://example.com"] == (None,)
 
 
 def test_cfnetworkproxymap_resolves_proxy(monkeypatch):
@@ -378,7 +378,7 @@ def test_cfnetworkproxymap_resolves_proxy(monkeypatch):
     )
 
     result = darwin.CFNetworkProxyMap()["http://example.com"]
-    assert list(result) == [Proxy.from_str("http://proxy.example.com:8080")]
+    assert list(result) == [Proxy.parse("http://proxy.example.com:8080")]
 
 
 def test_cfnetworkproxymap_resolves_fallback_chain(monkeypatch):
@@ -392,7 +392,7 @@ def test_cfnetworkproxymap_resolves_fallback_chain(monkeypatch):
     )
 
     result = list(darwin.CFNetworkProxyMap()["http://example.com"])
-    assert result == [Proxy.from_str("http://p1:80"), Proxy.from_str("http://p2:80"), None]
+    assert result == [Proxy.parse("http://p1:80"), Proxy.parse("http://p2:80"), None]
 
 
 def test_cfnetworkproxymap_passes_deadline_through(monkeypatch):
@@ -442,9 +442,9 @@ def test_darwin_system_proxy_manual_proxy(monkeypatch):
     result = darwin.system_proxy()
     assert isinstance(result, EnvProxyConfig)
     assert list(result["http://example.com"]) == [
-        Proxy.from_str("http://proxy.example.com:8080")
+        Proxy.parse("http://proxy.example.com:8080")
     ]
-    assert result["http://localhost"] == [None]
+    assert result["http://localhost"] == (None,)
 
 
 def _fake_cf_bindings(monkeypatch):

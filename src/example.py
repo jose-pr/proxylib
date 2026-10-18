@@ -3,11 +3,11 @@ import urllib.request
 import requests
 
 from proxylib import (
-    ProxyMap,
     ProxyMapAdapter,
     ProxyMapHandler,
     SimpleProxyMap,
     auto_proxy,
+    from_source,
 )
 
 # Auto-detect the system/env proxy (or fall back to WPAD discovery).
@@ -22,7 +22,7 @@ session.mount("https://", adapter)
 response = session.get("https://google.com")
 
 # A PAC file can also be loaded and used directly.
-pac_proxymap = ProxyMap("file:examples/example.pac")
+pac_proxymap = from_source("file:examples/example.pac")
 session.mount("http://", ProxyMapAdapter(pac_proxymap))
 session.mount("https://", ProxyMapAdapter(pac_proxymap))
 

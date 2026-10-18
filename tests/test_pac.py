@@ -98,7 +98,7 @@ def test_pac_timeRange_full_day():
 
 def test_pac_FindProxyForURL_default_direct():
     assert pac.FindProxyForURL("http://example.com", "example.com") == "DIRECT"
-    assert pac["http://example.com"] == [None]
+    assert pac["http://example.com"] == (None,)
 
 
 def test_pac_findproxyforurl_receives_full_url():
@@ -296,18 +296,16 @@ def test_dns_resolve_caches_negative_results(monkeypatch):
 
 def test_example_pac_file():
     proxies = load_pac("file:examples/example.pac")
-    assert proxies["http://plain/test"] == [None]
+    assert proxies["http://plain/test"] == (None,)
     for dom in [1, 2, 3]:
-        assert proxies[f"example{dom}.com"] == [None]
-        assert proxies[f"host.example{dom}.com"] == [None]
+        assert proxies[f"example{dom}.com"] == (None,)
+        assert proxies[f"host.example{dom}.com"] == (None,)
 
-    assert proxies["https://wustat.windows.com"] == [None]
+    assert proxies["https://wustat.windows.com"] == (None,)
 
-    assert proxies["https://127.1.1.1/testing"] == [None]
-    assert proxies["https://test.site"] == [
-        Proxy.from_str("http://wcg1.example.com:8080")
-    ]
-    assert proxies["nfs://127.1.1.1/testing"] == [None]
+    assert proxies["https://127.1.1.1/testing"] == (None,)
+    assert proxies["https://test.site"] == (Proxy.parse("http://wcg1.example.com:8080"),)
+    assert proxies["nfs://127.1.1.1/testing"] == (None,)
 
 
 def _fake_urlopen(monkeypatch, body, seen):
@@ -353,14 +351,12 @@ def test_load_decodes_a_non_utf8_script_as_latin1(monkeypatch):
     assert pac.load("http://internal/latin1.pac", cache_ttl=0) is not None
 
 
-def test_pac_is_a_proxymap_and_a_context_manager():
-    from proxylib import ProxyMap, unpatch
+def test_pac_is_a_proxymap():
+    from proxylib import ProxyMap, lookup
 
     pac = PAC()
     assert isinstance(pac, ProxyMap)
-    with pac as entered:
-        assert entered is pac
-    unpatch()
+    assert lookup(pac, "http://x/") == (None,)
 
 
 def test_pac_skips_unknown_keywords_and_hostless_entries():
@@ -369,7 +365,8 @@ def test_pac_skips_unknown_keywords_and_hostless_entries():
         def FindProxyForURL(url, host):
             return "garbage!!; PROXY ; HTTPS secure:443; SOCKS5 s:1080; DIRECT"
 
-    proxies = Junk()["http://example.com/"]
+    with pytest.warns(UserWarning, match="garbage"):
+        proxies = Junk()["http://example.com/"]
     assert [p.url if p else None for p in proxies] == ["https://secure:443", "socks5://s:1080", None]
 
 
@@ -380,7 +377,11 @@ def test_pac_result_with_nothing_usable_is_direct(result):
         def FindProxyForURL(url, host):
             return result
 
-    assert Empty()["http://example.com/"] == [None]
+    if result == "garbage!!":
+        with pytest.warns(UserWarning, match="garbage"):
+            assert Empty()["http://example.com/"] == (None,)
+    else:
+        assert Empty()["http://example.com/"] == (None,)
 
 
 @pytest.mark.parametrize(

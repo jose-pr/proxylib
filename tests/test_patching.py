@@ -83,7 +83,7 @@ def test_patch_partial_failure_rolls_back_already_applied_targets():
 
 def test_patch_again_while_active_warns_and_replaces(fake_target):
     first = SimpleProxyMap("DIRECT")
-    second = SimpleProxyMap(Proxy.from_str("http://p:80"))
+    second = SimpleProxyMap(Proxy.parse("http://p:80"))
     patch(first, targets=["fake"])
 
     with pytest.warns(UserWarning, match="already patched"):
@@ -113,7 +113,7 @@ requests = pytest.importorskip("requests")
 def test_requests_target_mounts_adapter_on_new_sessions():
     from proxylib.integrations.requests import ProxyMapAdapter
 
-    proxymap = SimpleProxyMap(Proxy.from_str("http://p:80"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://p:80"))
     patch(proxymap, targets=["requests"])
 
     session = requests.Session()
@@ -167,15 +167,7 @@ def test_urllib_target_unpatch_restores_prior_opener():
 # ---- ProxyMap context manager --------------------------------------------------
 
 
-def test_proxymap_context_manager_patches_and_unpatches(fake_target):
+def test_a_proxymap_is_not_a_context_manager():
+    # Patching is done by patch(), never as a side effect of using a map.
     proxymap = SimpleProxyMap("DIRECT")
-
-    with proxymap as active:
-        assert active is proxymap
-        # __enter__ calls patch(self) with targets=None -- every registered
-        # target (including this test's "fake" one) gets applied.
-        assert fake_target["patch"] == [proxymap]
-
-    # __exit__ called unpatch() -- nothing left active.
-    assert fake_target["unpatch"] == 1
-    assert patching._active_map is None
+    assert not hasattr(proxymap, "__enter__")

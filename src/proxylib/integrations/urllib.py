@@ -14,7 +14,7 @@ from __future__ import annotations
 import urllib.request
 from typing import Any
 
-from ..proxy import ProxyMap
+from ..proxy import ProxyMap, lookup
 
 __all__ = ("ProxyMapHandler",)
 
@@ -37,10 +37,13 @@ class ProxyMapHandler(urllib.request.ProxyHandler):
         self.proxymap = proxymap
 
     def _resolve(self, req: Any):
-        proxy = next(iter(self.proxymap.get(req.full_url, ()) or ()), None)
+        try:
+            proxy = lookup(self.proxymap, req.full_url)[0]
+        except KeyError:
+            proxy = None
         if proxy is None:
             return None  # DIRECT: fall through to the default (non-proxying) handler.
-        return self.proxy_open(req, proxy.as_uri(), req.type)
+        return self.proxy_open(req, proxy.uri(), req.type)
 
     http_open = _resolve
     https_open = _resolve

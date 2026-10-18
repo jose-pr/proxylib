@@ -14,7 +14,7 @@ def _public_callables():
                 member = getattr(member, "__func__", member)
                 if callable(member) and (not attr.startswith("_") or attr == "__init__"):
                     yield f"{name}.{attr}", member
-        elif callable(obj):
+        elif inspect.isfunction(obj):
             yield name, obj
 
 

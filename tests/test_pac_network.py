@@ -66,7 +66,7 @@ def test_load_without_an_engine_warns_and_returns_direct(http_server, monkeypatc
     http_server.route("/proxy.pac", _SCRIPT)
     with pytest.warns(UserWarning):
         result = pac.load(http_server.url("/proxy.pac"))
-    assert result["http://example.com/"] == [None]
+    assert result["http://example.com/"] == (None,)
 
 
 def test_load_does_not_cache_file_urls(tmp_path):

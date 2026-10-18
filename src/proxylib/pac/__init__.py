@@ -15,7 +15,6 @@ import time as _time
 from functools import lru_cache as _lru_cache
 from pathlib import Path
 from typing import Dict as _Dict
-from typing import Iterable as _Iter
 from typing import Literal as _Literal
 from typing import Optional as _Optional
 from typing import Tuple as _Tuple
@@ -28,7 +27,7 @@ from urllib.request import build_opener as _build_opener
 from warnings import warn as _warn
 
 from .. import _net
-from ..proxy import Proxy, ProxyMap, UriSplit
+from ..proxy import Proxy, ProxyMap
 
 _WEEKDAY = _Literal["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 _WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
@@ -41,12 +40,10 @@ _MONTHS = (
 
 __all__ = ("PAC", "load", "clear_download_cache", "clear_dns_cache")
 
-# Fetching a PAC/WPAD script must never itself go through a configured HTTP
-# proxy -- browsers fetch PAC config bypassing proxy settings for the same
-# chicken-and-egg reason, and it's a hard prerequisite for LocalProxyServer
-# (companion plan), where env vars point at ourselves and a proxied PAC
-# fetch would recurse. ProxyHandler({}) with no entries beats the default
-# opener's env-var-honoring behavior.
+# A PAC/WPAD fetch never goes through a configured proxy, as in browsers: the
+# proxy may be the thing the PAC is about to choose, and a local proxy that
+# points the environment at itself would make the fetch recurse.
+# ProxyHandler({}) overrides the default opener's use of the environment.
 _urlopen = _build_opener(_ProxyHandler({})).open
 
 # (monotonic timestamp, result) per host, for PAC.dnsResolve. Short TTL
@@ -74,9 +71,6 @@ def _shexp_regex(shexp: str) -> "_re.Pattern[str]":
     return _re.compile("".join(parts), _re.DOTALL)
 
 
-# Result keywords a PAC script may return; anything else is skipped.
-_PAC_SCHEMES = frozenset(("http", "https", "socks4", "socks5"))
-
 
 class PAC(ProxyMap):
     """Base implementation of the PAC utility-function namespace.
@@ -86,14 +80,8 @@ class PAC(ProxyMap):
     to actually select proxies.
     """
 
-    # ProxyMap methods that are not PAC functions: kept out of the JS scope so
-    # a JSProxyAutoConfig still answers them in Python.
-    _JSCONTEXT_EXCLUDE = ["get"]
-
-    def __init__(self, *_args, **_kwargs) -> None:
-        # Takes no configuration. Arguments are accepted because the
-        # ProxyMap(src) factory may return a PAC, and Python then calls
-        # __init__ on it with the factory's arguments.
+    def __init__(self) -> None:
+        # Defined so typing.Protocol does not supply one for subclasses.
         pass
 
     #### UTILITY FUNCTIONS ####
@@ -340,7 +328,7 @@ class PAC(ProxyMap):
     def FindProxyForURL(url: str, host: str, /) -> str:
         return "DIRECT"
 
-    def __getitem__(self, url: str) -> _Iter[_Optional[Proxy]]:
+    def __getitem__(self, url: str) -> "_Tuple[_Optional[Proxy], ...]":
         # Pass the full URL (path and query included) -- that's what the PAC
         # spec's FindProxyForURL receives, and the whole reason the
         # requests/urllib integrations resolve per-request instead of
@@ -349,15 +337,8 @@ class PAC(ProxyMap):
         parsed = urlparse(url)
         pac_proxies = self.FindProxyForURL(url, parsed.hostname or "")
         if not isinstance(pac_proxies, str):
-            pac_proxies = ""
-        # Entries with an unknown keyword or no host are skipped and a result
-        # with nothing usable left means DIRECT, as browsers treat it.
-        proxies = [
-            proxy
-            for proxy in Proxy.find_all(pac_proxies, UriSplit.PAC)
-            if proxy is None or (proxy.scheme in _PAC_SCHEMES and proxy.host)
-        ]
-        return proxies or [None]
+            return (None,)
+        return Proxy.parse_pac_result(pac_proxies)
 
 
 try:
@@ -377,13 +358,8 @@ try:
         class JSProxyAutoConfig(PAC, JSContext, metaclass=_JSProxyAutoConfigMeta):
             """A PAC whose `FindProxyForURL` (and the utility functions above) run as real JS."""
 
-            def __init__(self, *args, **kwargs) -> None:
-                # Explicit, since PAC.__init__ would otherwise shadow
-                # JSContext.__init__. Skipped when already built: the
-                # ProxyMap(src) factory returns a loaded instance and Python
-                # then calls __init__ on it again with the factory's arguments.
-                if "_jsengine" not in object.__getattribute__(self, "__dict__"):
-                    JSContext.__init__(self, *args, **kwargs)
+            # Explicit, since PAC.__init__ comes first in the MRO.
+            __init__ = JSContext.__init__
 
     else:
         JSProxyAutoConfig = None

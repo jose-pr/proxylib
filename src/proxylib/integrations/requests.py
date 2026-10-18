@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..exceptions import MissingExtraError
-from ..proxy import ProxyMap
+from ..proxy import ProxyMap, lookup
 
 __all__ = ("ProxyMapAdapter",)
 
@@ -70,7 +70,7 @@ def _build_adapter_class() -> type:
         def send(self, request: "PreparedRequest", **kwargs: Any):
             proxies = dict(kwargs.get("proxies") or {})
             try:
-                entries = self.proxymap[request.url]
+                entries = lookup(self.proxymap, request.url)
             except KeyError:
                 entries = None  # no opinion: leave `proxies` as-is (env/session settings apply)
 
@@ -78,7 +78,7 @@ def _build_adapter_class() -> type:
                 hostname = urlsplit(request.url).hostname
                 if hostname:
                     scheme = urlsplit(request.url).scheme
-                    resolved = next(iter(entries), None)
+                    resolved = entries[0]
                     # The most-specific key select_proxy() checks (scheme://
                     # hostname, ahead of a bare scheme/"all") -- this is what
                     # actually outranks requests' own env-proxy injection
@@ -90,7 +90,7 @@ def _build_adapter_class() -> type:
                     # as "not configured".
                     proxies.setdefault(
                         f"{scheme}://{hostname}",
-                        resolved.as_uri() if resolved is not None else None,
+                        resolved.uri() if resolved is not None else None,
                     )
             kwargs["proxies"] = proxies
             return super().send(request, **kwargs)

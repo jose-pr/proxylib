@@ -29,7 +29,10 @@ from .proxy import ConfigurableProxyMap as ConfigurableProxyMap
 from .proxy import Proxy as Proxy
 from .proxy import ProxyMap as ProxyMap
 from .proxy import SimpleProxyMap as SimpleProxyMap
-from .proxy import UriSplit as UriSplit
+from .proxy import ProxyAnswer as ProxyAnswer
+from .proxy import ProxyLike as ProxyLike
+from .proxy import from_source as from_source
+from .proxy import lookup as lookup
 
 __all__ = (
     "ChainProxyMap",
@@ -42,19 +45,22 @@ __all__ = (
     "PAC",
     "PACError",
     "Proxy",
+    "ProxyAnswer",
     "ProxyDict",
+    "ProxyLike",
     "ProxyMap",
     "ProxyMapAdapter",
     "ProxyMapHandler",
     "ProxyParseError",
     "ProxylibError",
     "SimpleProxyMap",
-    "UriSplit",
     "auto_proxy",
     "clear_caches",
     "discover_pac",
+    "from_source",
     "get_default_no_proxy",
     "load_pac",
+    "lookup",
     "patch",
     "register_patcher",
     "set_default_no_proxy",

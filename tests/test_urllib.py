@@ -4,7 +4,7 @@ from proxylib import Proxy, ProxyMapHandler, SimpleProxyMap
 
 
 def test_proxymaphandler_injects_resolved_proxy():
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy.example.com:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy.example.com:8080"))
     handler = ProxyMapHandler(proxymap)
 
     req = urllib.request.Request("http://example.com/foo")
@@ -28,7 +28,7 @@ def test_proxymaphandler_https_open_injects_resolved_proxy():
     # https doesn't take the request-type-mismatch recursion path (it always
     # returns None to let the same handler chain continue, tunneling via
     # CONNECT), so this is directly exercisable without a registered opener.
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy.example.com:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy.example.com:8080"))
     handler = ProxyMapHandler(proxymap)
 
     req = urllib.request.Request("https://example.com/foo")
@@ -43,7 +43,7 @@ def test_proxymaphandler_ftp_open_is_same_resolver_as_http_open():
     # which needs a real registered opener (and would attempt a real
     # connection) -- out of scope here. Just confirm the three protocol
     # hooks share the same resolution logic.
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy.example.com:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy.example.com:8080"))
     handler = ProxyMapHandler(proxymap)
 
     assert handler.ftp_open.__func__ is handler.http_open.__func__
@@ -54,9 +54,9 @@ def test_proxymaphandler_uses_full_url_not_just_scheme(monkeypatch):
     calls = []
 
     class RecordingProxyMap:
-        def get(self, url, default=None):
+        def __getitem__(self, url):
             calls.append(url)
-            return [Proxy.from_str("http://proxy:8080")]
+            return [Proxy.parse("http://proxy:8080")]
 
     handler = ProxyMapHandler(RecordingProxyMap())
     req = urllib.request.Request("http://example.com/some/path?query=1")
@@ -70,7 +70,7 @@ def test_proxymaphandler_does_not_shadow_methods_with_env_proxies(monkeypatch):
     # setattr per-protocol instance methods that shadow ours -- make sure
     # constructing with an env HTTP_PROXY set doesn't break this.
     monkeypatch.setenv("HTTP_PROXY", "http://from-env:9999")
-    proxymap = SimpleProxyMap(Proxy.from_str("http://from-proxymap:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://from-proxymap:8080"))
     handler = ProxyMapHandler(proxymap)
 
     req = urllib.request.Request("http://example.com/foo")

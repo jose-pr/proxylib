@@ -15,37 +15,37 @@ def clear_default_no_proxy():
 
 def test_env_selects_http_vs_https_proxy():
     cfg = EnvProxyConfig("http://httpproxy:80", "http://httpsproxy:80", [])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://httpproxy:80")]
-    assert list(cfg["https://example.com"]) == [Proxy.from_str("http://httpsproxy:80")]
+    assert list(cfg["http://example.com"]) == [Proxy.parse("http://httpproxy:80")]
+    assert list(cfg["https://example.com"]) == [Proxy.parse("http://httpsproxy:80")]
 
 
 def test_no_proxy_exact_and_subdomain_match():
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com"])
-    assert cfg["https://example.com"] == [None]
-    assert cfg["https://api.example.com"] == [None]
+    assert cfg["https://example.com"] == (None,)
+    assert cfg["https://api.example.com"] == (None,)
 
 
 def test_no_proxy_does_not_match_lookalike_domain():
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com"])
-    assert list(cfg["https://evilexample.com"]) == [Proxy.from_str("http://proxy:80")]
+    assert list(cfg["https://evilexample.com"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_no_proxy_leading_dot_entry():
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", [".example.com"])
-    assert cfg["https://api.example.com"] == [None]
-    assert cfg["https://example.com"] == [None]
+    assert cfg["https://api.example.com"] == (None,)
+    assert cfg["https://example.com"] == (None,)
 
 
 def test_no_proxy_port_specific_entry():
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com:8080"])
-    assert cfg["http://example.com:8080"] == [None]
-    assert list(cfg["http://example.com:80"]) == [Proxy.from_str("http://proxy:80")]
+    assert cfg["http://example.com:8080"] == (None,)
+    assert list(cfg["http://example.com:80"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_no_proxy_cidr_matches_ip_literal():
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["10.0.0.0/8"])
-    assert cfg["http://10.1.2.3"] == [None]
-    assert list(cfg["http://11.0.0.1"]) == [Proxy.from_str("http://proxy:80")]
+    assert cfg["http://10.1.2.3"] == (None,)
+    assert list(cfg["http://11.0.0.1"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_no_proxy_cidr_ipv6_entry_parses_correctly():
@@ -69,20 +69,20 @@ def test_no_proxy_cidr_does_not_match_hostname_without_resolving(monkeypatch):
 
     monkeypatch.setattr(env._net, "resolve_ip", boom)
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["10.0.0.0/8"])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
+    assert list(cfg["http://example.com"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_default_no_proxy_is_merged_in():
     set_default_no_proxy(["example.com"])
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", [])
-    assert cfg["https://example.com"] == [None]
+    assert cfg["https://example.com"] == (None,)
 
 
 def test_default_no_proxy_does_not_override_explicit_rules():
     set_default_no_proxy(["other.com"])
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com"])
-    assert cfg["https://example.com"] == [None]
-    assert cfg["https://other.com"] == [None]
+    assert cfg["https://example.com"] == (None,)
+    assert cfg["https://other.com"] == (None,)
 
 
 def test_get_default_no_proxy_returns_a_copy():
@@ -94,7 +94,7 @@ def test_get_default_no_proxy_returns_a_copy():
 
 def test_no_proxy_local_bypasses_loopback():
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>"])
-    assert cfg["http://127.0.0.1"] == [None]
+    assert cfg["http://127.0.0.1"] == (None,)
 
 
 def test_no_proxy_local_bypasses_link_local():
@@ -102,7 +102,7 @@ def test_no_proxy_local_bypasses_link_local():
     # it even without a matching local interface subnet (shared helper with
     # ConfigurableProxyMap's bypass_local=).
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>"])
-    assert cfg["http://169.254.1.1"] == [None]
+    assert cfg["http://169.254.1.1"] == (None,)
 
 
 def test_env_accepts_trailing_slash_proxy_urls():
@@ -110,8 +110,8 @@ def test_env_accepts_trailing_slash_proxy_urls():
     # proxy map -- it used to be misrouted into the PAC loader (network I/O
     # from the constructor, then failure).
     cfg = EnvProxyConfig("http://proxy:8080/", "http://sproxy:443/", [])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:8080")]
-    assert list(cfg["https://example.com"]) == [Proxy.from_str("http://sproxy:443")]
+    assert list(cfg["http://example.com"]) == [Proxy.parse("http://proxy:8080")]
+    assert list(cfg["https://example.com"]) == [Proxy.parse("http://sproxy:443")]
 
 
 def test_env_does_not_resolve_dns_without_local_entry(monkeypatch):
@@ -122,7 +122,7 @@ def test_env_does_not_resolve_dns_without_local_entry(monkeypatch):
 
     monkeypatch.setattr(env._net, "resolve_ip", boom)
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["other.com"])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
+    assert list(cfg["http://example.com"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_no_proxy_star_bypasses_everything():
@@ -131,15 +131,15 @@ def test_no_proxy_star_bypasses_everything():
     # This used to parse to a ("*", None) host entry that matched nothing,
     # so a configured proxy was still returned.
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["*"])
-    assert cfg["https://example.com"] == [None]
-    assert cfg["http://10.1.2.3:8080"] == [None]
+    assert cfg["https://example.com"] == (None,)
+    assert cfg["http://10.1.2.3:8080"] == (None,)
 
 
 def test_no_proxy_star_bypasses_even_with_no_proxy_configured():
     # The wildcard is an explicit DIRECT decision, not "no opinion" -- it must
     # not fall through to the KeyError an unconfigured scheme would give.
     cfg = EnvProxyConfig(None, None, ["*"])
-    assert cfg["https://example.com"] == [None]
+    assert cfg["https://example.com"] == (None,)
 
 
 def test_no_proxy_star_short_circuits_before_local_dns(monkeypatch):
@@ -153,7 +153,7 @@ def test_no_proxy_star_short_circuits_before_local_dns(monkeypatch):
 
     monkeypatch.setattr(env._net, "resolve_ip", boom)
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>", "*"])
-    assert cfg["http://example.com"] == [None]
+    assert cfg["http://example.com"] == (None,)
 
 
 def test_no_proxy_star_entry_parses_to_the_wildcard_sentinel():
@@ -180,8 +180,8 @@ def test_from_env_star_no_proxy(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "*")
 
     cfg = EnvProxyConfig.from_env()
-    assert cfg["http://example.com"] == [None]
-    assert cfg["https://anything.internal"] == [None]
+    assert cfg["http://example.com"] == (None,)
+    assert cfg["https://anything.internal"] == (None,)
 
 
 def test_no_proxy_star_reaches_configurable_proxy_map():
@@ -191,7 +191,7 @@ def test_no_proxy_star_reaches_configurable_proxy_map():
     from proxylib import ConfigurableProxyMap, SimpleProxyMap
 
     cfg = ConfigurableProxyMap(SimpleProxyMap("http://proxy:80"), no_proxy=["*"])
-    assert list(cfg["https://example.com"]) == [None]
+    assert cfg["https://example.com"] == (None,)
 
 
 def test_default_no_proxy_star_merges_into_configurable_proxy_map():
@@ -204,7 +204,7 @@ def test_default_no_proxy_star_merges_into_configurable_proxy_map():
 
     set_default_no_proxy(["*"])
     cfg = ConfigurableProxyMap(SimpleProxyMap("http://proxy:80"), bypass_local=True)
-    assert list(cfg["https://example.com"]) == [None]
+    assert cfg["https://example.com"] == (None,)
 
 
 def test_from_env_reads_upper_and_lower_case(monkeypatch):
@@ -215,24 +215,24 @@ def test_from_env_reads_upper_and_lower_case(monkeypatch):
     monkeypatch.setenv("no_proxy", "localhost, example.com")
 
     cfg = EnvProxyConfig.from_env()
-    assert cfg["http://localhost"] == [None]
-    assert cfg["http://example.com"] == [None]
-    assert list(cfg["http://other.com"]) == [Proxy.from_str("http://proxy:80")]
+    assert cfg["http://localhost"] == (None,)
+    assert cfg["http://example.com"] == (None,)
+    assert list(cfg["http://other.com"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_no_proxy_accepts_abbreviated_ipv4_cidr():
     # macOS ships "169.254/16" in its default bypass list.
     cfg = EnvProxyConfig("http://proxy:80", None, ["169.254/16", "10/8"])
-    assert cfg["http://169.254.1.2/"] == [None]
-    assert cfg["http://10.1.2.3/"] == [None]
-    assert list(cfg["http://11.0.0.1/"]) == [Proxy.from_str("http://proxy:80")]
+    assert cfg["http://169.254.1.2/"] == (None,)
+    assert cfg["http://10.1.2.3/"] == (None,)
+    assert list(cfg["http://11.0.0.1/"]) == [Proxy.parse("http://proxy:80")]
 
 
 def test_no_proxy_unparsable_entry_is_skipped_with_warning():
     with pytest.warns(UserWarning, match="10.0.0.0/99"):
         cfg = EnvProxyConfig("http://proxy:80", None, ["10.0.0.0/99", "example.com"])
-    assert cfg["http://example.com/"] == [None]
-    assert list(cfg["http://other.test/"]) == [Proxy.from_str("http://proxy:80")]
+    assert cfg["http://example.com/"] == (None,)
+    assert list(cfg["http://other.test/"]) == [Proxy.parse("http://proxy:80")]
 
 
 def _clear_proxy_env(monkeypatch):
@@ -250,7 +250,7 @@ def test_from_env_ignores_uppercase_http_proxy_inside_cgi(monkeypatch):
     cfg = EnvProxyConfig.from_env()
     with pytest.raises(KeyError):
         cfg["http://example.com/"]
-    assert list(cfg["https://example.com/"]) == [Proxy.from_str("http://trusted:3128")]
+    assert list(cfg["https://example.com/"]) == [Proxy.parse("http://trusted:3128")]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="environment names are case-insensitive on Windows")
@@ -259,4 +259,4 @@ def test_from_env_keeps_lowercase_http_proxy_inside_cgi(monkeypatch):
     monkeypatch.setenv("REQUEST_METHOD", "GET")
     monkeypatch.setenv("http_proxy", "http://trusted:3128")
     cfg = EnvProxyConfig.from_env()
-    assert list(cfg["http://example.com/"]) == [Proxy.from_str("http://trusted:3128")]
+    assert list(cfg["http://example.com/"]) == [Proxy.parse("http://trusted:3128")]

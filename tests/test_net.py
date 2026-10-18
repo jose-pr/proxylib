@@ -4,7 +4,7 @@ import pytest
 
 import proxylib
 from proxylib import NoReachableProxyError, _net
-from proxylib.proxy import Proxy, UriSplit
+from proxylib.proxy import Proxy
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +65,7 @@ class _FakeProbe:
 def test_first_working_proxy_returns_first_reachable(monkeypatch):
     fake = _FakeProbe(reachable={"p2"})
     monkeypatch.setattr(_net, "_tcp_check", fake)
-    p1, p2 = Proxy.from_str("http://p1:8080"), Proxy.from_str("http://p2:8080")
+    p1, p2 = Proxy.parse("http://p1:8080"), Proxy.parse("http://p2:8080")
     assert _net.first_working_proxy([p1, p2]) is p2
     assert fake.attempts == [("p1", 8080), ("p2", 8080)]
 
@@ -73,27 +73,27 @@ def test_first_working_proxy_returns_first_reachable(monkeypatch):
 def test_first_working_proxy_direct_short_circuits(monkeypatch):
     fake = _FakeProbe(reachable=set())
     monkeypatch.setattr(_net, "_tcp_check", fake)
-    assert _net.first_working_proxy([None, Proxy.from_str("http://p:80")]) is None
+    assert _net.first_working_proxy([None, Proxy.parse("http://p:80")]) is None
     assert fake.attempts == []
 
 
 def test_first_working_proxy_uses_default_port_when_missing(monkeypatch):
     fake = _FakeProbe(reachable={"p"})
     monkeypatch.setattr(_net, "_tcp_check", fake)
-    _net.first_working_proxy([Proxy.from_str("PROXY p", UriSplit.PAC)])
+    _net.first_working_proxy([Proxy.parse_pac_result("PROXY p")[0]])
     assert fake.attempts == [("p", 80)]
 
 
 def test_first_working_proxy_raises_when_none_reachable(monkeypatch):
     monkeypatch.setattr(_net, "_tcp_check", _FakeProbe(reachable=set()))
     with pytest.raises(NoReachableProxyError):
-        _net.first_working_proxy([Proxy.from_str("http://p1:80"), Proxy.from_str("http://p2:80")])
+        _net.first_working_proxy([Proxy.parse("http://p1:80"), Proxy.parse("http://p2:80")])
 
 
 def test_first_working_proxy_blacklists_a_failed_probe(monkeypatch):
     fake = _FakeProbe(reachable={"p2"})
     monkeypatch.setattr(_net, "_tcp_check", fake)
-    p1, p2 = Proxy.from_str("http://p1:80"), Proxy.from_str("http://p2:80")
+    p1, p2 = Proxy.parse("http://p1:80"), Proxy.parse("http://p2:80")
     assert _net.first_working_proxy([p1, p2]) is p2
     fake.attempts.clear()
     assert _net.first_working_proxy([p1, p2]) is p2
@@ -104,7 +104,7 @@ def test_first_working_proxy_circuit_breaker_expires(monkeypatch):
     fake = _FakeProbe(reachable=set())
     monkeypatch.setattr(_net, "_tcp_check", fake)
     clock = [1000.0]
-    p1 = Proxy.from_str("http://p1:80")
+    p1 = Proxy.parse("http://p1:80")
     with pytest.raises(NoReachableProxyError):
         _net.first_working_proxy([p1], circuit_breaker_ttl=30.0, clock=lambda: clock[0])
     fake.attempts.clear()
@@ -117,7 +117,7 @@ def test_first_working_proxy_circuit_breaker_expires(monkeypatch):
 def test_first_working_proxy_circuit_breaker_ttl_zero_disables_it(monkeypatch):
     fake = _FakeProbe(reachable=set())
     monkeypatch.setattr(_net, "_tcp_check", fake)
-    p1 = Proxy.from_str("http://p1:80")
+    p1 = Proxy.parse("http://p1:80")
     with pytest.raises(NoReachableProxyError):
         _net.first_working_proxy([p1], circuit_breaker_ttl=0)
     fake.reachable.add("p1")

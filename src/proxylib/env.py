@@ -5,10 +5,12 @@ from __future__ import annotations
 import ipaddress as _ip
 import os
 import warnings
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, NamedTuple, Optional, Tuple, Union
+from urllib.parse import urlsplit
 
 from . import _net
-from .proxy import URL, Proxy, ProxyMap, SimpleProxyMap
+from .exceptions import ProxyParseError
+from .proxy import Proxy, ProxyMap, SimpleProxyMap, lookup
 
 __all__ = ("EnvProxyConfig", "set_default_no_proxy", "get_default_no_proxy")
 
@@ -18,9 +20,8 @@ _NoProxyNetwork = Union["_ip.IPv4Network", "_ip.IPv6Network"]
 class _Wildcard:
     """Sentinel for a bare ``*`` NO_PROXY entry: bypass the proxy for every host.
 
-    A distinct type rather than a ``("*", None)`` host entry, which is what
-    this used to parse to and could never match a real hostname (the host
-    matcher compares exact/dot-suffix only).
+    A distinct type rather than a ``("*", None)`` host entry, which the host
+    matcher (exact or dot-suffix) could never match.
     """
 
     __slots__ = ()
@@ -73,6 +74,25 @@ def _parse_no_proxy_entries(entries: "Iterable[str]") -> "List[_NoProxyEntry]":
         except ValueError as exc:
             warnings.warn(f"Ignoring unparsable NO_PROXY entry {entry!r}: {exc}", stacklevel=3)
     return parsed
+
+
+class _RequestURL(NamedTuple):
+    """(scheme, host, port) of a request URL; host lower-cased, IPv6 unbracketed."""
+
+    scheme: str
+    host: str
+    port: Optional[int]
+
+    @classmethod
+    def parse(cls, url: str) -> "_RequestURL":
+        try:
+            parts = urlsplit(url)
+            port = parts.port
+        except ValueError as exc:
+            raise ProxyParseError(f"invalid request URL {url!r}: {exc}") from None
+        if not parts.scheme or not parts.hostname:
+            raise ProxyParseError(f"{url!r} is not a URL with a scheme and a host")
+        return cls(parts.scheme.lower(), parts.hostname, port)
 
 
 def _parse_no_proxy_entry(entry: str) -> _NoProxyEntry:
@@ -155,15 +175,15 @@ class EnvProxyConfig(ProxyMap):
         merged = dict.fromkeys([*(no_proxy or ()), *get_default_no_proxy()])
         self.no_proxy: "List[_NoProxyEntry]" = _parse_no_proxy_entries(merged)
 
-    def __getitem__(self, url: str) -> Iterable[Optional[Proxy]]:
-        uri = URL.from_str(url)
+    def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
+        uri = _RequestURL.parse(url)
         if _WILDCARD in self.no_proxy:
             # Ahead of the loop, not inside it: "*" short-circuits every other
             # rule, and testing it first means a "<local>" entry sitting earlier
             # in the list can't charge this lookup a DNS round-trip that the
-            # wildcard was always going to make irrelevant. (Still after
-            # URL.from_str, so a malformed key raises ValueError either way.)
-            return [None]
+            # wildcard was always going to make irrelevant. (Still after the
+            # URL is parsed, so a malformed key raises either way.)
+            return (None,)
         # Name resolution blocks and only "<local>" entries need it, so it
         # happens inside that branch, never once per lookup.
         ip_literal: "Optional[Union[_ip.IPv4Address, _ip.IPv6Address]]" = None
@@ -177,15 +197,14 @@ class EnvProxyConfig(ProxyMap):
                 if ip is None:
                     continue
                 if _net.is_link_scoped(ip):
-                    return [None]
+                    return (None,)
                 for _if in _net.local_networks():
                     if ip in _if.network:
-                        return [None]
+                        return (None,)
             elif isinstance(entry, (_ip.IPv4Network, _ip.IPv6Network)):
                 # CIDR entries match IP-literal request hosts only (curl
-                # semantics) -- resolving hostnames to check membership
-                # would reintroduce the per-lookup DNS cost this module
-                # otherwise deliberately avoids (see the known-bugs note).
+                # semantics): resolving a hostname here would cost a DNS
+                # lookup on every request.
                 if not ip_literal_checked:
                     try:
                         ip_literal = _ip.ip_address(uri.host)
@@ -193,13 +212,13 @@ class EnvProxyConfig(ProxyMap):
                         ip_literal = None
                     ip_literal_checked = True
                 if ip_literal is not None and ip_literal in entry:
-                    return [None]
+                    return (None,)
             elif _no_proxy_matches(uri.host, uri.port, entry):
-                return [None]
+                return (None,)
         target = self.https_proxy if uri.scheme == "https" else self.http_proxy
         if target is None:
             raise KeyError(url)
-        return target[f"{uri.scheme}://{uri.netloc}"]
+        return lookup(target, url)
 
     @staticmethod
     def from_env() -> "EnvProxyConfig":
