@@ -163,7 +163,7 @@ proxymap = load_pac("file:./proxy.pac")
 proxymap["https://example.com/"]
 ```
 
-`from_source(value)` picks the right map for a configured value without doing any
+`ProxyMap(value)` picks the right map for a configured value without doing any
 I/O: a proxy URL or PAC result string builds a `SimpleProxyMap`, a PAC location (a
 `file:` URL or an `http(s)` URL with a path) is loaded on the first lookup, and
 anything else indexable by URL is used as it is.

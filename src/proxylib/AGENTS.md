@@ -41,6 +41,12 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 - **`ProxyMap`** — `runtime_checkable` `Protocol` with only `__getitem__(url)`.
   `isinstance(x, ProxyMap)` is true for any object with `__getitem__` (a `dict`, and
   also a `str` — it checks the shape only).
+- **`ProxyMap(src=None) -> ProxyMap`** — calling the protocol builds a map from a
+  configured value, with no I/O: `None`, a proxy URL, a PAC result string, a `Proxy`
+  or a list/tuple of them → `SimpleProxyMap`; a PAC location (`file:` URL, inline
+  script, or `http(s)` URL with a path beyond `/`) → a map that loads it on first
+  lookup; anything else with `__getitem__` is returned unchanged (never
+  re-initialised).
 - **`ProxyLike`**, **`ProxyAnswer`** — the type aliases for one proxy and for an
   answer, as listed above.
 - **`lookup(proxymap, url) -> tuple[Proxy | None, ...]`** — never empty. A
@@ -48,11 +54,6 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
   uses, most specific first: `scheme://host`, `scheme`, `all://host`, `all`. Raises
   `KeyError` for no opinion, `TypeError` for an answer that names no proxy,
   `ProxyParseError` for malformed proxy text.
-- **`from_source(value) -> ProxyMap`** — a map from a configured value, with no I/O:
-  `None`, a proxy URL, a PAC result string, a `Proxy` or a list/tuple of them →
-  `SimpleProxyMap`; a PAC location (`file:` URL, inline script, or `http(s)` URL with
-  a path beyond `/`) → a map that loads it on first lookup; anything else with
-  `__getitem__` is returned unchanged.
 - **`SimpleProxyMap(proxy=None)`** — the same answer for every URL; takes anything
   `lookup` reads. `.proxies` is the parsed tuple.
 - **`ChainProxyMap(*maps)`** — asks each map in order through `lookup`; the first

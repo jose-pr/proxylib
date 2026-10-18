@@ -8,7 +8,7 @@ from proxylib import (
     Proxy,
     ProxyParseError,
     SimpleProxyMap,
-    from_source,
+    ProxyMap,
 )
 
 def test_pac_result_direct():
@@ -94,32 +94,54 @@ def test_simple_proxy_map_from_pac_string():
     assert SimpleProxyMap("DIRECT").proxies == (None,)
 
 
-def test_from_source_proxy_url_is_a_simple_map():
-    assert isinstance(from_source("http://proxy.example.com:8080"), SimpleProxyMap)
+def test_proxymap_call_proxy_url_is_a_simple_map():
+    assert isinstance(ProxyMap("http://proxy.example.com:8080"), SimpleProxyMap)
 
 
-def test_from_source_trailing_slash_is_a_proxy_not_a_pac():
+def test_proxymap_call_trailing_slash_is_a_proxy_not_a_pac():
     # HTTP_PROXY-style values are commonly written with a trailing slash.
-    m = from_source("http://proxy.example.com:8080/")
+    m = ProxyMap("http://proxy.example.com:8080/")
     assert isinstance(m, SimpleProxyMap)
     assert m["http://x"][0].url == "http://proxy.example.com:8080"
 
 
-def test_from_source_pac_location_is_loaded_on_first_lookup(monkeypatch):
+def test_proxymap_call_pac_location_is_loaded_on_first_lookup(monkeypatch):
     import proxylib.pac as pac
 
     loads = []
     monkeypatch.setattr(pac, "load", lambda src: loads.append(src) or SimpleProxyMap("PROXY a:1"))
-    m = from_source("file:examples/example.pac")
+    m = ProxyMap("file:examples/example.pac")
     assert loads == []
     assert m["http://x/"][0].host == "a"
     m["http://y/"]
     assert loads == ["file:examples/example.pac"]
 
 
-def test_from_source_returns_a_mapping_unchanged():
+def test_proxymap_call_returns_a_mapping_unchanged():
     proxies = {"http": "http://p:1"}
-    assert from_source(proxies) is proxies
+    assert ProxyMap(proxies) is proxies
+
+
+def test_proxymap_call_does_not_reinitialise_a_returned_map():
+    class Counting(SimpleProxyMap):
+        inits = 0
+
+        def __init__(self, proxy=None):
+            type(self).inits += 1
+            super().__init__(proxy)
+
+    existing = Counting("PROXY a:1")
+    assert ProxyMap(existing) is existing
+    assert Counting.inits == 1
+
+
+def test_proxymap_call_without_arguments_is_direct():
+    assert ProxyMap()["http://x/"] == (None,)
+
+
+def test_proxymap_is_still_structural():
+    assert isinstance({}, ProxyMap) and isinstance(SimpleProxyMap(), ProxyMap)
+    assert not isinstance(42, ProxyMap)
 
 
 class _KeyErrorMap:

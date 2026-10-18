@@ -22,8 +22,6 @@ Work toward 2.0, which breaks the 1.x API.
   a PAC result string, any object with a `url` attribute, or an iterable of
   those; an empty answer is DIRECT. A plain mapping is also asked with the keys
   `requests` uses (`scheme://host`, `scheme`, `all://host`, `all`).
-- `from_source(value)` builds a proxy map from a configured value without I/O;
-  a PAC location is loaded on its first lookup.
 - `Proxy.parse(text)` and `Proxy.parse_pac_result(text)`, and the `ProxyLike` /
   `ProxyAnswer` type aliases.
 - `BypassRules`: one bypass-list type with parsers for `NO_PROXY` (curl), Windows
@@ -35,9 +33,10 @@ Work toward 2.0, which breaks the 1.x API.
 ### Changed
 
 - `ProxyMap` is a structural protocol with only `__getitem__`: a plain `dict`,
-  or any object indexable by URL, is a proxy map. `get()`, `in`, the
-  `ProxyMap(src)` factory (use `from_source`) and the context manager (use
-  `patch()`/`unpatch()`) are gone.
+  or any object indexable by URL, is a proxy map. `get()`, `in` and the
+  context manager (use `patch()`/`unpatch()`) are gone. `ProxyMap(src)` still
+  builds a map from a configured value, now without any I/O: a PAC location is
+  loaded on its first lookup, and an existing map is returned unchanged.
 - `Proxy` is an immutable value class, `Proxy(scheme, host, port=None,
   username=None, password=None)`; absent port and credentials are `None`
   (1.x: `0` and `""`). `as_uri()` is now `uri()` and percent-encodes the

@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from .bypass import BypassRules
 from .exceptions import ProxyParseError
-from .proxy import Proxy, ProxyMap, from_source, lookup
+from .proxy import Proxy, ProxyMap, lookup
 
 __all__ = ("EnvProxyConfig",)
 
@@ -47,7 +47,7 @@ class EnvProxyConfig:
             no_proxy if isinstance(no_proxy, BypassRules) else BypassRules.parse(no_proxy)
         )
         self._maps: "Dict[str, ProxyMap]" = {
-            scheme: from_source(value) for scheme, value in self.proxies.items()
+            scheme: ProxyMap(value) for scheme, value in self.proxies.items()
         }
 
     def __repr__(self) -> str:

@@ -30,7 +30,6 @@ from .proxy import ProxyMap as ProxyMap
 from .proxy import SimpleProxyMap as SimpleProxyMap
 from .proxy import ProxyAnswer as ProxyAnswer
 from .proxy import ProxyLike as ProxyLike
-from .proxy import from_source as from_source
 from .proxy import lookup as lookup
 
 __all__ = (
@@ -57,7 +56,6 @@ __all__ = (
     "auto_proxy",
     "clear_caches",
     "discover_pac",
-    "from_source",
     "load_pac",
     "lookup",
     "patch",

@@ -32,7 +32,6 @@ __all__ = [
     "ProxyAnswer",
     "ProxyMap",
     "lookup",
-    "from_source",
     "SimpleProxyMap",
     "ChainProxyMap",
     "ConfigurableProxyMap",
@@ -209,13 +208,34 @@ ProxyAnswer = Union[None, ProxyLike, Iterable[Optional[ProxyLike]]]
 """What ``proxymap[url]`` may return."""
 
 
+class _ProxyMapMeta(type(Protocol)):  # type: ignore[misc]
+    """Makes ``ProxyMap(src)`` build a map instead of failing as a Protocol.
+
+    Intercepting the call here, rather than in ``ProxyMap.__new__``, means a
+    map handed back by the factory is never run through ``__init__`` again.
+    Subclasses are constructed as usual.
+    """
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        if cls is ProxyMap:
+            return _from_source(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
+
+
 @runtime_checkable
-class ProxyMap(Protocol):
+class ProxyMap(Protocol, metaclass=_ProxyMapMeta):
     """Anything indexable by request URL: ``proxymap[url]`` returns a
     :data:`ProxyAnswer` or raises ``KeyError`` for "no opinion".
 
     Structural: a ``dict`` and any class with ``__getitem__`` qualify without
     importing proxylib. Read an answer with :func:`lookup`.
+
+    Calling it builds a map from a configured value, with no I/O:
+    ``ProxyMap(None)``, a proxy URL, a PAC result string, a ``Proxy`` or a
+    list/tuple of them gives a :class:`SimpleProxyMap`; a PAC location
+    (``file:`` URL, inline script, or an ``http(s)`` URL with a path) gives a
+    map that loads the PAC on its first lookup; anything else with
+    ``__getitem__`` is returned as is.
     """
 
     def __getitem__(self, url: str, /) -> ProxyAnswer: ...
@@ -335,14 +355,8 @@ class _LazyPacMap:
         return lookup(self._pac, url)
 
 
-def from_source(src: Any) -> ProxyMap:
-    """A proxy map from a value a user configured. Does no I/O.
-
-    ``None``, a proxy URL, a PAC result string, a ``Proxy`` or an iterable of
-    them gives a :class:`SimpleProxyMap`; a PAC location (``file:`` URL, inline
-    script, or an ``http(s)`` URL with a path) gives a map that loads the PAC on
-    its first lookup; anything else with ``__getitem__`` is returned as is.
-    """
+def _from_source(src: Any = None) -> ProxyMap:
+    """``ProxyMap(src)``; see :class:`ProxyMap`."""
     if isinstance(src, str) and _is_pac_location(src):
         return _LazyPacMap(src)
     if src is None or isinstance(src, (str, Proxy)):
