@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
-from typing import Dict, Iterable, NamedTuple, Optional
+from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 from ..env import EnvProxyConfig
 from ..pac.wpad import discover as _wpad_discover
@@ -82,6 +82,12 @@ _winhttp.WinHttpGetProxyForUrl.argtypes = [
     ctypes.POINTER(_WinHttpProxyInfo),
 ]
 _winhttp.WinHttpGetProxyForUrl.restype = wintypes.BOOL
+_winhttp.WinHttpSetTimeouts.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+_winhttp.WinHttpSetTimeouts.restype = wintypes.BOOL
+
+# Milliseconds for name resolution, connect, send and receive on the session
+# WinHTTP uses to fetch a PAC file; its own resolve default is unbounded.
+_SESSION_TIMEOUT_MS = 10_000
 
 
 class _IEProxySettings(NamedTuple):
@@ -216,11 +222,27 @@ def _query_proxy_for_url(
             _kernel32.GlobalFree(info.lpszProxyBypass)
 
 
-def _resolve_for_scheme(url: str, proxy_str: str) -> "Optional[Proxy]":
-    per_protocol = _split_per_protocol_proxy(proxy_str)
+def _resolve_for_scheme(url: str, proxy_str: str) -> "List[Proxy]":
+    """Every proxy in a WinHTTP proxy list that applies to ``url``, in order.
+
+    The list is ``[<scheme>=]<server>[:<port>]`` entries separated by ``;`` or
+    whitespace (``WINHTTP_PROXY_INFO``). Entries for this scheme or for no
+    scheme apply; with none of those, the http entries and then the https
+    ones are used, as before.
+    """
     scheme = URL.from_str(url).scheme
-    selected = per_protocol.get(scheme) or per_protocol.get("http") or per_protocol.get("https")
-    return Proxy.from_str(_as_url(selected)) if selected else None
+    entries: "List[Tuple[str, str]]" = []
+    for token in proxy_str.replace(";", " ").split():
+        protocol, sep, server = token.partition("=")
+        if not sep:
+            protocol, server = "", token
+        if server:
+            entries.append((protocol.strip().lower(), server))
+    for wanted in ((scheme, ""), ("http",), ("https",)):
+        selected = [server for protocol, server in entries if protocol in wanted]
+        if selected:
+            return [Proxy.from_str(_as_url(server)) for server in selected]
+    return []
 
 
 class WinHttpProxyMap(ProxyMap):
@@ -246,6 +268,8 @@ class WinHttpProxyMap(ProxyMap):
         self._hsession = _winhttp.WinHttpOpen(
             "proxylib", _WINHTTP_ACCESS_TYPE_NO_PROXY, None, None, 0
         )
+        if self._hsession:
+            _winhttp.WinHttpSetTimeouts(self._hsession, *([_SESSION_TIMEOUT_MS] * 4))
 
     def close(self) -> None:
         if self._hsession:
@@ -277,8 +301,7 @@ class WinHttpProxyMap(ProxyMap):
             if ok:
                 if not proxy:
                     return [None]
-                resolved = _resolve_for_scheme(url, proxy)
-                return [resolved] if resolved else [None]
+                return _resolve_for_scheme(url, proxy) or [None]
             # WinHttpGetProxyForUrl failed (e.g. ERROR_WINHTTP_AUTODETECTION_FAILED)
             # -- fall through to the static manual-proxy fallback below.
 

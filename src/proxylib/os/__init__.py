@@ -54,9 +54,14 @@ def _native_system_provider() -> "Optional[ProxyMap]":
     return LibProxyMap(lib) if lib is not None else None
 
 
+_PROVIDERS = ("python", "system")
+
+
 def system_proxy(provider: str = "python") -> "ProxyMap|str":
     """Read this machine's proxy configuration. See the module docstring
-    for what ``provider`` means."""
+    for what ``provider`` means. Any other ``provider`` raises ``ValueError``."""
+    if provider not in _PROVIDERS:
+        raise ValueError(f"unknown provider {provider!r}; expected one of {_PROVIDERS}")
     if provider == "system":
         native = _native_system_provider()
         if native is not None:

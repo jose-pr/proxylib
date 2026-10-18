@@ -445,3 +445,55 @@ def test_darwin_system_proxy_manual_proxy(monkeypatch):
         Proxy.from_str("http://proxy.example.com:8080")
     ]
     assert result["http://localhost"] == [None]
+
+
+def _fake_cf_bindings(monkeypatch):
+    import types
+
+    from proxylib.os import darwin
+
+    monkeypatch.setattr(darwin, "_cfstring_to_str", lambda cf, ref: ref)
+    monkeypatch.setattr(darwin, "_cfnumber_to_int", lambda cf, ref: ref)
+    cf = types.SimpleNamespace(CFDictionaryGetValue=lambda entry, key: entry.get(key))
+    names = ("None", "AutoConfigurationURL", "HTTP", "HTTPS", "SOCKS", "FTP")
+    cfb = types.SimpleNamespace(
+        cf=cf,
+        kCFProxyTypeKey="type",
+        kCFProxyHostNameKey="host",
+        kCFProxyPortNumberKey="port",
+        kCFProxyAutoConfigurationURLKey="pac",
+        **{f"kCFProxyType{name}": name for name in names},
+    )
+    return darwin, cfb
+
+
+def test_cfnetwork_https_entry_is_a_plain_http_proxy(monkeypatch):
+    darwin, cfb = _fake_cf_bindings(monkeypatch)
+    entry = {"type": "HTTPS", "host": "proxy", "port": 3128}
+    assert darwin._parse_proxy_entry(cfb, entry) == ("proxy", "http://proxy:3128")
+
+
+def test_cfnetwork_unknown_or_hostless_entry_is_skipped(monkeypatch):
+    darwin, cfb = _fake_cf_bindings(monkeypatch)
+    assert darwin._parse_proxy_entry(cfb, {"type": "JavaScript"}) == ("skip", None)
+    assert darwin._parse_proxy_entry(cfb, {"type": "HTTP", "host": None}) == ("skip", None)
+    assert darwin._parse_proxy_entry(cfb, {"type": "None"}) == ("direct", None)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows WinHTTP backend")
+def test_winhttp_proxy_list_keeps_every_entry_in_order():
+    from proxylib.os import nt
+
+    def urls(url, value):
+        return [p.url for p in nt._resolve_for_scheme(url, value)]
+
+    assert urls("http://x/", "p1:8080;p2:8080") == ["http://p1:8080", "http://p2:8080"]
+    assert urls("https://x/", "http=a:1 https=b:2 c:3") == ["http://b:2", "http://c:3"]
+    assert urls("ftp://x/", "http=a:1;https=b:2") == ["http://a:1"]
+
+
+def test_system_proxy_rejects_an_unknown_provider():
+    import proxylib.os as proxylib_os
+
+    with pytest.raises(ValueError, match="sytem"):
+        proxylib_os.system_proxy("sytem")

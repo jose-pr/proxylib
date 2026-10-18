@@ -248,7 +248,8 @@ def _cfnumber_to_int(cf: "ctypes.CDLL", ref: "Optional[int]") -> "Optional[int]"
 def _parse_proxy_entry(cfb: "_CFBindings", entry: int) -> "Tuple[str, Optional[str]]":
     """Parse one ``CFNetworkCopyProxiesForURL`` result dict.
 
-    Returns ``("direct", None)``, ``("proxy", "scheme://host:port")``, or
+    Returns ``("direct", None)``, ``("proxy", "scheme://host:port")``,
+    ``("skip", None)`` for an entry with no usable proxy, or
     ``("pac", pac_url_string)`` for the "system says: run this PAC script"
     case (``kCFProxyTypeAutoConfigurationURL``) -- the caller is responsible
     for actually executing it via ``CFNetworkExecuteProxyAutoConfigurationURL``.
@@ -261,19 +262,21 @@ def _parse_proxy_entry(cfb: "_CFBindings", entry: int) -> "Tuple[str, Optional[s
         pac_url_ref = cf.CFDictionaryGetValue(entry, cfb.kCFProxyAutoConfigurationURLKey)
         pac_url_string_ref = cf.CFURLGetString(pac_url_ref) if pac_url_ref else None
         return ("pac", _cfstring_to_str(cf, pac_url_string_ref))
+    # kCFProxyTypeHTTPS names the proxy used for https URLs, which is a plain
+    # HTTP proxy reached with CONNECT, not one that speaks TLS itself.
     scheme = {
         cfb.kCFProxyTypeHTTP: "http",
-        cfb.kCFProxyTypeHTTPS: "https",
+        cfb.kCFProxyTypeHTTPS: "http",
         cfb.kCFProxyTypeSOCKS: "socks5",
         cfb.kCFProxyTypeFTP: "ftp",
     }.get(proxy_type)
     if scheme is None:
         # kCFProxyTypeAutoConfigurationJavaScript or an unrecognized type --
-        # no usable entry to try.
-        return ("direct", None)
+        # no usable entry to try, so the next entry decides.
+        return ("skip", None)
     host = _cfstring_to_str(cf, cf.CFDictionaryGetValue(entry, cfb.kCFProxyHostNameKey))
     if not host:
-        return ("direct", None)
+        return ("skip", None)
     port = _cfnumber_to_int(cf, cf.CFDictionaryGetValue(entry, cfb.kCFProxyPortNumberKey))
     return ("proxy", f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}")
 
@@ -355,6 +358,8 @@ def _resolve_proxies_for_url(url: str, deadline: float = 5.0) -> "Optional[List[
                 for i in range(cf.CFArrayGetCount(proxies)):
                     entry = cf.CFArrayGetValueAtIndex(proxies, i)
                     kind, extra = _parse_proxy_entry(cfb, entry)
+                    if kind == "skip":
+                        continue
                     if kind != "pac":
                         results.append(extra)
                         continue
@@ -376,7 +381,8 @@ def _resolve_proxies_for_url(url: str, deadline: float = 5.0) -> "Optional[List[
                     try:
                         for j in range(cf.CFArrayGetCount(pac_array)):
                             pac_kind, pac_extra = _parse_proxy_entry(cfb, cf.CFArrayGetValueAtIndex(pac_array, j))
-                            results.append(pac_extra if pac_kind == "proxy" else None)
+                            if pac_kind != "skip":
+                                results.append(pac_extra if pac_kind == "proxy" else None)
                     finally:
                         cf.CFRelease(pac_array)
                 return results or [None]
