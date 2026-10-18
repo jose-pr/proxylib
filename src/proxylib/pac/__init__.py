@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import datetime as _datetime
 import ipaddress as _ip
+import re as _re
 import socket as _socket
 import time as _time
-from fnmatch import fnmatch as _shexpmatch
+from functools import lru_cache as _lru_cache
 from pathlib import Path
 from typing import Dict as _Dict
 from typing import Iterable as _Iter
@@ -26,7 +27,7 @@ from urllib.request import build_opener as _build_opener
 from warnings import warn as _warn
 
 from ..netutils import get_ip
-from ..proxy import Proxy, UriSplit
+from ..proxy import Proxy, ProxyMap, UriSplit
 
 _WEEKDAY = _Literal["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
 _WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
@@ -62,13 +63,36 @@ def clear_dns_cache() -> None:
     _dns_cache.clear()
 
 
-class PAC(object):
+@_lru_cache(maxsize=256)
+def _shexp_regex(shexp: str) -> "_re.Pattern[str]":
+    # Netscape shell expressions: "*" and "?" are the only wildcards; "[" and
+    # every other character are literal, matched case-sensitively, as in the
+    # Mozilla and Chromium PAC runtimes.
+    parts = (".*" if c == "*" else "." if c == "?" else _re.escape(c) for c in shexp)
+    return _re.compile("".join(parts), _re.DOTALL)
+
+
+# Result keywords a PAC script may return; anything else is skipped.
+_PAC_SCHEMES = frozenset(("http", "https", "socks4", "socks5"))
+
+
+class PAC(ProxyMap):
     """Base implementation of the PAC utility-function namespace.
 
     ``FindProxyForURL`` here always returns ``"DIRECT"``; subclass and
     override it (or use :class:`JSProxyAutoConfig` to run a real PAC script)
     to actually select proxies.
     """
+
+    # ProxyMap methods that are not PAC functions: kept out of the JS scope so
+    # a JSProxyAutoConfig still answers them in Python.
+    _JSCONTEXT_EXCLUDE = ["get"]
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        # Takes no configuration. Arguments are accepted because the
+        # ProxyMap(src) factory may return a PAC, and Python then calls
+        # __init__ on it with the factory's arguments.
+        pass
 
     #### UTILITY FUNCTIONS ####
     @staticmethod
@@ -125,7 +149,7 @@ class PAC(object):
 
     @staticmethod
     def shExpMatch(test: str, shexp: str, /) -> bool:
-        return _shexpmatch(test, shexp)
+        return _shexp_regex(shexp).fullmatch(test) is not None
 
     #### TIME FUNCTIONS ####
     @_overload
@@ -322,20 +346,16 @@ class PAC(object):
         # you configure yourself is trusted with your own URLs.)
         parsed = urlparse(url)
         pac_proxies = self.FindProxyForURL(url, parsed.hostname or "")
-        return Proxy.find_all(pac_proxies, UriSplit.PAC)
-
-    def get(self, uri: str, default=None):
-        try:
-            return self[uri]
-        except KeyError:
-            return default
-
-    def __contains__(self, key: object) -> bool:
-        try:
-            self[key]
-            return True
-        except KeyError:
-            return False
+        if not isinstance(pac_proxies, str):
+            pac_proxies = ""
+        # Entries with an unknown keyword or no host are skipped and a result
+        # with nothing usable left means DIRECT, as browsers treat it.
+        proxies = [
+            proxy
+            for proxy in Proxy.find_all(pac_proxies, UriSplit.PAC)
+            if proxy is None or (proxy.scheme in _PAC_SCHEMES and proxy.host)
+        ]
+        return proxies or [None]
 
 
 try:
@@ -349,8 +369,20 @@ try:
 
     if _jspac:
 
-        class JSProxyAutoConfig(PAC, JSContext):
+        class _JSProxyAutoConfigMeta(type(JSContext), type(PAC)):  # type: ignore[misc]
+            """Joins JSContext's export-collecting metaclass with the Protocol
+            metaclass PAC inherits from ProxyMap."""
+
+        class JSProxyAutoConfig(PAC, JSContext, metaclass=_JSProxyAutoConfigMeta):
             """A PAC whose `FindProxyForURL` (and the utility functions above) run as real JS."""
+
+            def __init__(self, *args, **kwargs) -> None:
+                # Explicit, since PAC.__init__ would otherwise shadow
+                # JSContext.__init__. Skipped when already built: the
+                # ProxyMap(src) factory returns a loaded instance and Python
+                # then calls __init__ on it again with the factory's arguments.
+                if "_jsengine" not in object.__getattribute__(self, "__dict__"):
+                    JSContext.__init__(self, *args, **kwargs)
 
     else:
         JSProxyAutoConfig = None

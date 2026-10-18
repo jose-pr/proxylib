@@ -169,3 +169,12 @@ def test_jsproxyautoconfig_is_safe_to_share_between_threads_on_dukpy(monkeypatch
 def test_jsproxyautoconfig_is_safe_to_share_between_threads_on_quickjs(monkeypatch):
     monkeypatch.setenv("PROXYLIB_JS_ENGINE", "quickjs")
     assert _hammer(JSProxyAutoConfig(_THREADED_PAC)) == []
+
+
+def test_jsproxyautoconfig_get_and_in_answer_in_python():
+    from proxylib import ProxyMap
+
+    pac = JSProxyAutoConfig('function FindProxyForURL(u, h) { return "PROXY a:1"; }')
+    assert isinstance(pac, ProxyMap)
+    assert pac.get("http://x/")[0].host == "a"
+    assert "http://x/" in pac

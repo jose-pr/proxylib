@@ -351,3 +351,50 @@ def test_load_decodes_a_non_utf8_script_as_latin1(monkeypatch):
     body = "function FindProxyForURL(u, h) { /* caf\xe9 */ return 'DIRECT'; }".encode("latin-1")
     pac = _fake_urlopen(monkeypatch, body, [])
     assert pac.load("http://internal/latin1.pac", cache_ttl=0) is not None
+
+
+def test_pac_is_a_proxymap_and_a_context_manager():
+    from proxylib import ProxyMap, unpatch
+
+    pac = PAC()
+    assert isinstance(pac, ProxyMap)
+    with pac as entered:
+        assert entered is pac
+    unpatch()
+
+
+def test_pac_skips_unknown_keywords_and_hostless_entries():
+    class Junk(PAC):
+        @staticmethod
+        def FindProxyForURL(url, host):
+            return "garbage!!; PROXY ; HTTPS secure:443; SOCKS5 s:1080; DIRECT"
+
+    proxies = Junk()["http://example.com/"]
+    assert [p.url if p else None for p in proxies] == ["https://secure:443", "socks5://s:1080", None]
+
+
+@pytest.mark.parametrize("result", ["", "garbage!!", None, 1])
+def test_pac_result_with_nothing_usable_is_direct(result):
+    class Empty(PAC):
+        @staticmethod
+        def FindProxyForURL(url, host):
+            return result
+
+    assert Empty()["http://example.com/"] == [None]
+
+
+@pytest.mark.parametrize(
+    "test, shexp, expected",
+    [
+        ("www.example.com", "*.example.com", True),
+        ("WWW.EXAMPLE.COM", "*.example.com", False),
+        ("a1", "a[1]", False),
+        ("a[1]", "a[1]", True),
+        ("ab", "a?", True),
+        ("abc", "a?", False),
+        ("a.b", "a?b", True),
+        ("http://x/p?q=1", "*/p?q=*", True),
+    ],
+)
+def test_shexpmatch_follows_browser_semantics(test, shexp, expected):
+    assert PAC.shExpMatch(test, shexp) is expected
