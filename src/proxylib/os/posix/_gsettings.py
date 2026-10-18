@@ -139,6 +139,7 @@ def read_desktop_proxy(schema: str) -> "Optional[Union[ProxyMap, str]]":
     ignore_hosts = _gsettings_get(schema, "ignore-hosts") or "[]"
     overrides = [h.strip(" '\"") for h in ignore_hosts.strip("[]").split(",") if h.strip(" '\"")]
     return EnvProxyConfig(
+        {},
         proxies={"http": http_proxy or https_proxy, "https": https_proxy},
         no_proxy=BypassRules.parse(overrides, dialect="gsettings"),
     )

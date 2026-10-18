@@ -1,8 +1,8 @@
 """Proxy configuration from ``*_proxy`` environment variables.
 
-:class:`EnvProxyConfig` is plain data -- a proxy per scheme plus bypass rules --
-and :meth:`EnvProxyConfig.from_environ` reads it from a mapping (the process
-environment by default), the way curl and Go's ``httpproxy`` do.
+:class:`EnvProxyConfig` reads a proxy per scheme plus bypass rules from an
+environment mapping -- the process environment by default -- the way curl and
+Go's ``httpproxy`` do.
 """
 
 from __future__ import annotations
@@ -22,27 +22,45 @@ _SCHEME_FALLBACK = {"ws": "http", "wss": "https"}
 
 
 class EnvProxyConfig:
-    """A proxy map from per-scheme proxies and bypass rules.
+    """A proxy map from ``*_proxy`` environment variables.
 
-    ``proxies`` maps a URL scheme, or ``"all"``, to a proxy: a ``Proxy``, a
-    proxy URL (scheme-less means ``http``), or a PAC location (a ``file:`` URL,
-    or an ``http(s)`` URL with a path), which is loaded on the first lookup
-    that needs it. ``no_proxy`` is :class:`BypassRules` or ``NO_PROXY`` text.
+    ``env`` is the environment to read: ``None`` (the default) reads
+    ``os.environ``, any other mapping is read instead (``{}`` reads nothing).
+    It supplies every ``<scheme>_proxy``, ``all_proxy`` and ``no_proxy``; a
+    lowercase name wins over its uppercase form. Inside a CGI request
+    (``REQUEST_METHOD`` set) an uppercase ``HTTP_PROXY`` is ignored, since a
+    client's ``Proxy:`` header can set it (httpoxy); with ``os.environ`` on
+    Windows, whose names are case-insensitive, ``http_proxy`` is then ignored
+    too.
+
+    ``proxies`` and ``no_proxy``, when given, are applied over what ``env``
+    supplied. ``proxies`` maps a URL scheme, or ``"all"``, to a proxy: a
+    ``Proxy``, a proxy URL (scheme-less means ``http``), or a PAC location (a
+    ``file:`` URL, or an ``http(s)`` URL with a path), which is loaded on the
+    first lookup that needs it. ``no_proxy`` is :class:`BypassRules` or
+    ``NO_PROXY`` text, and replaces the environment's.
 
     A lookup answers DIRECT for a bypassed URL, else the proxy for the URL's
-    scheme, else the ``"all"`` proxy; with none of those it raises
-    ``KeyError`` (no opinion), since the environment cannot say "DIRECT".
+    scheme (``ws``/``wss`` fall back to ``http``/``https``), else the ``"all"``
+    proxy; with none of those it raises ``KeyError`` (no opinion), since the
+    environment cannot say "DIRECT".
     """
 
     __slots__ = ("proxies", "no_proxy", "_maps")
 
     def __init__(
         self,
+        env: "Optional[Mapping[str, str]]" = None,
         *,
-        proxies: "Mapping[str, Union[str, Proxy]]" = {},
+        proxies: "Optional[Mapping[str, Union[str, Proxy]]]" = None,
         no_proxy: "Union[BypassRules, str, Iterable[str], None]" = None,
     ) -> None:
-        self.proxies: "Dict[str, Union[str, Proxy]]" = {k.lower(): v for k, v in proxies.items() if v}
+        env_proxies, env_no_proxy = _read_env(os.environ if env is None else env)
+        merged: "Dict[str, Union[str, Proxy]]" = dict(env_proxies)
+        merged.update({k.lower(): v for k, v in (proxies or {}).items()})
+        self.proxies: "Dict[str, Union[str, Proxy]]" = {k: v for k, v in merged.items() if v}
+        if no_proxy is None:
+            no_proxy = env_no_proxy
         self.no_proxy: BypassRules = (
             no_proxy if isinstance(no_proxy, BypassRules) else BypassRules.parse(no_proxy)
         )
@@ -63,36 +81,28 @@ class EnvProxyConfig:
                 return lookup(self._maps[key], url)
         raise KeyError(url)
 
-    @classmethod
-    def from_environ(cls, environ: "Optional[Mapping[str, str]]" = None) -> "EnvProxyConfig":
-        """Read ``<scheme>_proxy``, ``all_proxy`` and ``no_proxy`` from
-        ``environ`` (default: ``os.environ``). A lowercase name wins over its
-        uppercase form. Inside a CGI request (``REQUEST_METHOD`` set) an
-        uppercase ``HTTP_PROXY`` is ignored, since a client's ``Proxy:`` header
-        can set it (httpoxy); on Windows, whose environment names are
-        case-insensitive, ``http_proxy`` is then ignored too.
-        """
-        if environ is None:
-            environ = os.environ
-        cgi = "REQUEST_METHOD" in environ
-        case_insensitive = environ is os.environ and os.name == "nt"
-        proxies: "Dict[str, str]" = {}
-        no_proxy: "Optional[str]" = None
-        # Uppercase names first, so the lowercase pass overwrites them.
-        for lowercase_pass in (False, True):
-            for name, value in environ.items():
-                if (name == name.lower()) != lowercase_pass:
-                    continue
-                key = name.lower()
-                if not key.endswith("_proxy"):
-                    continue
-                if key == "no_proxy":
-                    no_proxy = value
-                    continue
-                if cgi and key == "http_proxy" and (not lowercase_pass or case_insensitive):
-                    continue
-                proxies[key[: -len("_proxy")]] = value
-        return cls(proxies=proxies, no_proxy=no_proxy)
+
+def _read_env(env: "Mapping[str, str]") -> "Tuple[Dict[str, str], Optional[str]]":
+    """(scheme -> proxy, NO_PROXY text) from an environment mapping."""
+    cgi = "REQUEST_METHOD" in env
+    case_insensitive = env is os.environ and os.name == "nt"
+    proxies: "Dict[str, str]" = {}
+    no_proxy: "Optional[str]" = None
+    # Uppercase names first, so the lowercase pass overwrites them.
+    for lowercase_pass in (False, True):
+        for name, value in env.items():
+            if (name == name.lower()) != lowercase_pass:
+                continue
+            key = name.lower()
+            if not key.endswith("_proxy"):
+                continue
+            if key == "no_proxy":
+                no_proxy = value
+                continue
+            if cgi and key == "http_proxy" and (not lowercase_pass or case_insensitive):
+                continue
+            proxies[key[: -len("_proxy")]] = value
+    return proxies, no_proxy
 
 
 def _request_scheme(url: str) -> str:

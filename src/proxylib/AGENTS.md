@@ -108,20 +108,22 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 
 ## Env var config (`proxylib.env`, re-exported at top level)
 
-- **`EnvProxyConfig(*, proxies={}, no_proxy=None)`** — a proxy map. `proxies` maps a
-  URL scheme or `"all"` to a `Proxy`, a proxy URL (scheme-less = `http`) or a PAC
-  location (`file:` URL, or `http(s)` URL with a path), which is loaded on the
-  first lookup that needs it. `no_proxy` is `BypassRules` or `NO_PROXY` text.
-  Lookup: bypassed → `(None,)`; else the scheme's proxy (`ws` falls back to `http`,
-  `wss` to `https`); else `"all"`; else **`KeyError`** (no opinion — the environment
-  cannot say DIRECT). A key that is not a URL raises `ProxyParseError`.
-  `repr()` hides passwords.
-- **`EnvProxyConfig.from_environ(environ=None)`** — reads every `<scheme>_proxy`,
-  `all_proxy` and `no_proxy` from `environ` (default `os.environ`); a lowercase name
-  wins over its uppercase form. Inside a CGI request (`REQUEST_METHOD` set) an
-  uppercase `HTTP_PROXY` is ignored (httpoxy); with `os.environ` on Windows, whose
-  names are case-insensitive, `http_proxy` is ignored then too. There is no PAC
-  environment variable: put a PAC URL in `HTTP_PROXY` and the others.
+- **`EnvProxyConfig(env=None, *, proxies=None, no_proxy=None)`** — a proxy map read
+  from an environment mapping: `env=None` reads `os.environ`, any other mapping is
+  read instead (`{}` reads nothing). It takes every `<scheme>_proxy`, `all_proxy`
+  and `no_proxy`; a lowercase name wins over its uppercase form. Inside a CGI
+  request (`REQUEST_METHOD` set) an uppercase `HTTP_PROXY` is ignored (httpoxy);
+  with `os.environ` on Windows, whose names are case-insensitive, `http_proxy` is
+  ignored then too. There is no PAC environment variable: put a PAC URL in
+  `HTTP_PROXY` and the others.
+  - `proxies` (scheme or `"all"` → `Proxy`, proxy URL with scheme-less = `http`, or
+    PAC location loaded on first use) is applied over the environment's;
+    `no_proxy` (`BypassRules` or `NO_PROXY` text) replaces the environment's.
+    Pass `env={}` to build one from explicit values only.
+  - Lookup: bypassed → `(None,)`; else the scheme's proxy (`ws` falls back to
+    `http`, `wss` to `https`); else `"all"`; else **`KeyError`** (no opinion — the
+    environment cannot say DIRECT). A key that is not a URL raises
+    `ProxyParseError`. `repr()` hides passwords.
 
 ## System / auto detection (`proxylib.os`, re-exported at top level)
 

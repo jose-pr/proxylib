@@ -49,6 +49,6 @@ def system_proxy() -> "Union[ProxyMap, str]":
         for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")
     )
     if has_env_proxy:
-        return EnvProxyConfig.from_environ()
+        return EnvProxyConfig()
 
     return SimpleProxyMap()

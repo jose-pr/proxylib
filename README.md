@@ -140,7 +140,7 @@ Pass `targets=["requests"]`/`["urllib"]` to patch just one. Sessions created *be
 import proxylib
 from proxylib import EnvProxyConfig
 
-proxymap = EnvProxyConfig.from_environ()  # http_proxy / https_proxy / all_proxy / no_proxy
+proxymap = EnvProxyConfig()  # os.environ: http_proxy / https_proxy / all_proxy / no_proxy
 proxylib.lookup(proxymap, "https://example.com")  # -> (Proxy(...),) or (None,) for DIRECT
 ```
 

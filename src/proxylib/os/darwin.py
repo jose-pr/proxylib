@@ -106,6 +106,7 @@ def system_proxy() -> "Union[ProxyMap, str]":
         if settings.get("ExcludeSimpleHostnames") == "1":
             exceptions.append("<local>")
         return EnvProxyConfig(
+            {},
             proxies={"http": http_proxy or https_proxy, "https": https_proxy or http_proxy},
             no_proxy=BypassRules.parse(exceptions, dialect="macos"),
         )

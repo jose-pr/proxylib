@@ -74,6 +74,7 @@ def detect() -> "Optional[Union[ProxyMap, str]]":
     overrides = [h.strip() for h in section.get("noproxyfor", "").split(",") if h.strip()]
     reversed_list = section.get("reversedexception", "false").strip().lower() == "true"
     return EnvProxyConfig(
+        {},
         proxies={"http": http_proxy or https_proxy, "https": https_proxy},
         no_proxy=BypassRules.parse(overrides, dialect="kde", reversed=reversed_list),
     )

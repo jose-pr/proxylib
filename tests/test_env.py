@@ -7,17 +7,17 @@ from proxylib import BypassRules, EnvProxyConfig, Proxy, ProxyParseError, lookup
 
 
 def _env(**names):
-    return EnvProxyConfig.from_environ(names)
+    return EnvProxyConfig(names)
 
 
 def test_selects_the_proxy_for_the_scheme():
-    cfg = EnvProxyConfig(proxies={"http": "http://httpproxy:80", "https": "http://httpsproxy:80"})
+    cfg = EnvProxyConfig({}, proxies={"http": "http://httpproxy:80", "https": "http://httpsproxy:80"})
     assert cfg["http://example.com"] == (Proxy.parse("http://httpproxy:80"),)
     assert cfg["https://example.com"] == (Proxy.parse("http://httpsproxy:80"),)
 
 
 def test_unconfigured_scheme_is_no_opinion():
-    cfg = EnvProxyConfig(proxies={"https": "http://p:1"})
+    cfg = EnvProxyConfig({}, proxies={"https": "http://p:1"})
     with pytest.raises(KeyError):
         cfg["http://example.com/"]
 
@@ -82,7 +82,7 @@ def test_no_proxy_star_bypasses_even_with_no_proxy_configured():
 
 def test_no_proxy_accepts_bypass_rules():
     rules = BypassRules.parse("*.corp", dialect="wininet")
-    cfg = EnvProxyConfig(proxies={"all": "http://p:1"}, no_proxy=rules)
+    cfg = EnvProxyConfig({}, proxies={"all": "http://p:1"}, no_proxy=rules)
     assert cfg["http://a.corp/"] == (None,)
 
 
@@ -110,7 +110,7 @@ def test_cgi_on_windows_ignores_http_proxy_from_os_environ(monkeypatch):
     monkeypatch.setenv("REQUEST_METHOD", "GET")
     monkeypatch.setenv("http_proxy", "http://attacker:1")
     with pytest.raises(KeyError):
-        EnvProxyConfig.from_environ()["http://example.com/"]
+        EnvProxyConfig()["http://example.com/"]
 
 
 def test_a_key_that_is_not_a_url_is_a_parse_error():
@@ -132,3 +132,35 @@ def test_empty_values_are_ignored():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         _env(no_proxy="")
+
+
+def _clear_proxy_variables(monkeypatch):
+    import os as _os
+
+    for name in list(_os.environ):
+        if name.lower().endswith("_proxy") or name.upper() == "REQUEST_METHOD":
+            monkeypatch.delenv(name, raising=False)
+
+
+def test_default_env_is_the_process_environment(monkeypatch):
+    _clear_proxy_variables(monkeypatch)
+    monkeypatch.setenv("ALL_PROXY", "http://fromenv:1")
+    assert EnvProxyConfig()["http://x/"][0].host == "fromenv"
+
+
+def test_an_empty_env_reads_nothing(monkeypatch):
+    monkeypatch.setenv("ALL_PROXY", "http://fromenv:1")
+    with pytest.raises(KeyError):
+        EnvProxyConfig({})["http://x/"]
+
+
+def test_keywords_apply_over_the_env():
+    cfg = EnvProxyConfig(
+        {"http_proxy": "http://env:1", "https_proxy": "http://envtls:1", "no_proxy": "a.test"},
+        proxies={"http": "http://kw:1"},
+        no_proxy="b.test",
+    )
+    assert cfg["http://x/"][0].host == "kw"
+    assert cfg["https://x/"][0].host == "envtls"
+    assert cfg["http://b.test/"] == (None,)
+    assert cfg["http://a.test/"][0].host == "kw"

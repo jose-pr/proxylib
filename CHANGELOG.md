@@ -44,9 +44,9 @@ Work toward 2.0, which breaks the 1.x API.
 - Built-in maps return tuples. A malformed proxy or request URL raises
   `ProxyParseError` (a `ValueError`). Bracketed IPv6 hosts parse
   (`http://[::1]:8080`), and a scheme-less `host:port` is an `http` proxy.
-- `EnvProxyConfig(*, proxies={}, no_proxy=None)` replaces the three positional
-  arguments; `EnvProxyConfig.from_environ(environ=None)` replaces `from_env()`
-  and reads any mapping. Every `<scheme>_proxy` is read, plus `all_proxy`; `ws`/`wss`
+- `EnvProxyConfig(env=None, *, proxies=None, no_proxy=None)` replaces the three
+  positional arguments and `from_env()`: it reads `env` (default `os.environ`,
+  any mapping accepted), with `proxies`/`no_proxy` applied over it. Every `<scheme>_proxy` is read, plus `all_proxy`; `ws`/`wss`
   use the `http`/`https` proxies; a lowercase name now wins over uppercase (stdlib
   and curl order); a PAC URL may be given as a proxy value.
 - `<local>` in a bypass list now means a host name without a dot (its WinINet

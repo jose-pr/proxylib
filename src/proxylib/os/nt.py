@@ -154,6 +154,7 @@ def _manual_proxy_map(settings: "_IEProxySettings") -> "Optional[ProxyMap]":
     if not (http_proxy or https_proxy):
         return None
     return EnvProxyConfig(
+        {},
         proxies={"http": _as_url(http_proxy), "https": _as_url(https_proxy)},
         no_proxy=BypassRules.parse(settings.proxy_bypass or "", dialect="wininet"),
     )

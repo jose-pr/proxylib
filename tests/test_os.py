@@ -52,7 +52,7 @@ def test_auto_proxy_loads_pac_url_string(monkeypatch):
 def test_auto_proxy_passes_through_env_config(monkeypatch):
     import proxylib.os as proxylib_os
 
-    cfg = EnvProxyConfig(proxies={"http": "http://proxy:80", "https": "http://proxy:80"})
+    cfg = EnvProxyConfig({}, proxies={"http": "http://proxy:80", "https": "http://proxy:80"})
     monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": cfg)
 
     result = proxylib_os.auto_proxy()

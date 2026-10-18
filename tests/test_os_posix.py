@@ -214,9 +214,9 @@ def _captured_proxy_urls(monkeypatch, gsettings, values):
     captured = {}
     real = gsettings.EnvProxyConfig
 
-    def capture(*, proxies, no_proxy):
+    def capture(env, *, proxies, no_proxy):
         captured.update(proxies)
-        return real(proxies=proxies, no_proxy=no_proxy)
+        return real(env, proxies=proxies, no_proxy=no_proxy)
 
     monkeypatch.setattr(gsettings, "_gsettings_get", _fake_gsettings(values))
     monkeypatch.setattr(gsettings, "EnvProxyConfig", capture)
