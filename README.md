@@ -28,10 +28,11 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
   `dbus-send` directly. `LibProxyMap` (libproxy's own resolution, called via `ctypes`
   bindings to its C API — no subprocess) is also available as a standalone `ProxyMap`
   you can use directly on any platform.
-- **Env var proxy config** — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (and lowercase
-  variants), with correct exact/subdomain `NO_PROXY` matching, plus CIDR entries,
-  `<local>`, and `*` (bypass everything; curl and `requests` honour it only as the
-  whole value, proxylib anywhere in the list).
+- **Env var proxy config** — every `<scheme>_proxy` plus `ALL_PROXY` and `NO_PROXY`
+  (lowercase wins), read from any mapping; a PAC URL may be given as a proxy value.
+- **Bypass rules in each OS's syntax** — `BypassRules` reads `NO_PROXY` (curl), the
+  Windows `ProxyOverride` list, macOS `ExceptionsList`, GNOME `ignore-hosts` and KDE
+  `NoProxyFor`: host suffixes, globs, CIDR (IPv4 and IPv6), ports, `<local>`.
 - **PAC support** — the full Netscape PAC utility-function set (including
   `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions, runnable either
   as real JavaScript through a pluggable engine (`dukpy` or `quickjs`, picked via
@@ -139,7 +140,7 @@ Pass `targets=["requests"]`/`["urllib"]` to patch just one. Sessions created *be
 import proxylib
 from proxylib import EnvProxyConfig
 
-proxymap = EnvProxyConfig.from_env()  # HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+proxymap = EnvProxyConfig.from_environ()  # http_proxy / https_proxy / all_proxy / no_proxy
 proxylib.lookup(proxymap, "https://example.com")  # -> (Proxy(...),) or (None,) for DIRECT
 ```
 

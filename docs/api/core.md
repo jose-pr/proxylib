@@ -4,4 +4,6 @@
 
 ::: proxylib.env
 
+::: proxylib.bypass
+
 ::: proxylib.exceptions
