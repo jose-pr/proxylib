@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 from typing import Optional, Union
 
-from ..pac import load as load_pac
+from ..pac import _load_any
 from ..proxy import ProxyMap, SimpleProxyMap
 
 __all__ = ("system_proxy", "auto_proxy")
@@ -79,7 +79,7 @@ def auto_proxy(provider: str = "python", **urlopen_kwargs) -> ProxyMap:
     """
     proxy = system_proxy(provider)
     if isinstance(proxy, str):
-        return load_pac(proxy, **urlopen_kwargs)
+        return _load_any(proxy)
     if isinstance(proxy, SimpleProxyMap) and proxy[""] == (None,):
         from ..pac.wpad import discover
 

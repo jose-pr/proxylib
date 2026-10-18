@@ -29,10 +29,10 @@ def test_auto_proxy_returns_proxy_map_for_direct_env(monkeypatch):
 
 def test_auto_proxy_falls_back_to_wpad(monkeypatch):
     import proxylib.os as proxylib_os
-    from proxylib.pac import PAC
+    from proxylib.pac import PacProxyMap
 
     monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": SimpleProxyMap())
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr("proxylib.pac.wpad.discover", lambda *a, **k: sentinel)
 
     result = proxylib_os.auto_proxy()
@@ -41,12 +41,12 @@ def test_auto_proxy_falls_back_to_wpad(monkeypatch):
 
 def test_auto_proxy_loads_pac_url_string(monkeypatch):
     import proxylib.os as proxylib_os
-    from proxylib.pac import PAC
+    from proxylib.pac import PacProxyMap
 
     monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": "file:examples/example.pac")
 
     result = proxylib_os.auto_proxy()
-    assert isinstance(result, PAC)
+    assert isinstance(result, PacProxyMap)
 
 
 def test_auto_proxy_passes_through_env_config(monkeypatch):
@@ -116,12 +116,12 @@ def test_nt_system_proxy_direct_when_no_settings(monkeypatch):
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows WinHTTP backend")
 def test_nt_system_proxy_auto_detect_uses_wpad_first(monkeypatch):
     import proxylib.os.nt as nt
-    from proxylib.pac import PAC
+    from proxylib.pac import PacProxyMap
 
     monkeypatch.setattr(
         nt, "_read_ie_proxy_config", lambda: nt._IEProxySettings(True, "http://ignored/proxy.pac", None, None)
     )
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr(nt, "_wpad_discover", lambda *a, **k: sentinel)
 
     assert nt.system_proxy() is sentinel
@@ -311,7 +311,7 @@ def test_darwin_system_proxy_direct_when_no_settings(monkeypatch):
 
 def test_darwin_system_proxy_auto_discovery_uses_wpad_first(monkeypatch):
     import proxylib.os.darwin as darwin
-    from proxylib.pac import PAC
+    from proxylib.pac import PacProxyMap
 
     monkeypatch.setattr(
         darwin,
@@ -322,7 +322,7 @@ def test_darwin_system_proxy_auto_discovery_uses_wpad_first(monkeypatch):
             "ProxyAutoConfigURLString": "http://ignored/proxy.pac",
         },
     )
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr(darwin, "_wpad_discover", lambda *a, **k: sentinel)
 
     assert darwin.system_proxy() is sentinel

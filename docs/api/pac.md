@@ -2,8 +2,10 @@
 
 ::: proxylib.pac
 
+::: proxylib.pac.script
+
+::: proxylib.pac.map
+
 ::: proxylib.pac.wpad
 
-::: proxylib.pac.javascript
-
-::: proxylib.pac.engines.base
+::: proxylib.pac.engines

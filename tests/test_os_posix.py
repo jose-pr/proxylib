@@ -6,7 +6,7 @@ from proxylib import Proxy
 from proxylib.env import EnvProxyConfig
 from proxylib.os.posix import _which
 from proxylib.os.posix._gsettings import clear_gsettings_cache
-from proxylib.pac import PAC
+from proxylib.pac import PacProxyMap
 from proxylib.proxy import SimpleProxyMap
 
 
@@ -290,7 +290,7 @@ def test_gnome_auto_blank_url_uses_wpad(monkeypatch):
             }
         ),
     )
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr(gsettings, "_wpad_discover", lambda *a, **k: sentinel)
 
     assert gnome.detect() is sentinel
@@ -438,7 +438,7 @@ def test_kde_wpad(tmp_path, monkeypatch):
 
     path = _write_kioslaverc(tmp_path, "[Proxy Settings]\nProxyType=3\n")
     monkeypatch.setattr(kde, "_kioslaverc_path", lambda: path)
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr(kde, "_wpad_discover", lambda *a, **k: sentinel)
 
     assert kde.detect() is sentinel
@@ -515,7 +515,7 @@ def test_nm_nmcli_auto_no_pac_uses_wpad(monkeypatch):
         return ["auto", "", ""]
 
     monkeypatch.setattr(nm, "_nmcli_get", fake_nmcli_get)
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr(nm, "_wpad_discover", lambda *a, **k: sentinel)
 
     assert nm.detect() is sentinel

@@ -17,6 +17,13 @@ Work toward 2.0, which breaks the 1.x API.
   top level. None of them is a `KeyError`, which keeps meaning "no opinion".
 - `proxylib.clear_caches()` drops every module-level cache in one call.
 - `proxylib.__all__` declares the public surface.
+- PAC is split into `pac.functions` (the builtins), `PacScript` (one script in a
+  JS engine) and `PacProxyMap` (the map, which also takes a Python
+  `FindProxyForURL` function). `pac.loads(text)` / `proxylib.loads_pac` load a
+  script from text; `pac.engines.names()` lists the installed engines.
+- PAC scripts run in a helper process with a time limit (`script_timeout=`,
+  default 1 s per call): a script that hangs raises `PACError` and stays failed
+  instead of hanging the program. Neither engine can be stopped in-process.
 - `lookup(proxymap, url)` reads any proxy map's answer as a tuple of `Proxy` or
   `None` (DIRECT). It accepts every answer shape: `None`, a `Proxy`, a proxy URL,
   a PAC result string, any object with a `url` attribute, or an iterable of
@@ -55,6 +62,16 @@ Work toward 2.0, which breaks the 1.x API.
 - Loopback (`localhost`, `127.0.0.0/8`, `::1`) bypasses the proxy wherever bypass
   rules apply, unless `<-loopback>` is listed. In `NO_PROXY`, `*` among other
   entries is ignored with a warning, as curl and requests do.
+- `pac.load(location)` takes a URL or a path only; script text goes to
+  `pac.loads()`. Download options are named (`timeout=`, `cache_ttl=`); the
+  `**urllib_kwds` pass-through is gone. A body over 1 MiB, a script error, a
+  script without `FindProxyForURL` and a time-limit overrun raise `PACError`.
+- With no JS engine installed, loading a PAC raises `MissingExtraError`;
+  `on_missing_engine="direct"` restores the old warn-and-DIRECT behaviour.
+- `PROXYLIB_JS_ENGINE` or `engine=` naming an unknown engine raises `ValueError`
+  (it was ignored). Engines are imported only when a script needs one.
+- `wpad.discover()` returns a `PacProxyMap`, takes keyword-only options and skips
+  a domain whose PAC fails to run.
 - proxylib now depends on `netimps>=0.4.0,<0.5` for host:port handling, local
   interfaces (real prefix lengths on every OS, no extra needed), bounded name
   lookups and TCP probes. `import proxylib` imports neither it nor `requests`.
@@ -69,6 +86,10 @@ Work toward 2.0, which breaks the 1.x API.
 
 ### Removed
 
+- `PAC`, `JSProxyAutoConfig`, `pac.javascript.JSContext`,
+  `pac.clear_download_cache()`, `pac.clear_dns_cache()` and
+  `pac.engines.get_engine_class()`: use `PacProxyMap` with a `PacScript` or a
+  Python function, `proxylib.clear_caches()` and `pac.engines.get_engine()`.
 - `set_default_no_proxy()` / `get_default_no_proxy()`: pass bypass rules where a
   map is built (`EnvProxyConfig(no_proxy=...)`, `ConfigurableProxyMap(no_proxy=...)`).
 - `UriSplit`, `Proxy.from_str`, `Proxy.find_all` and `Proxy.as_uri`: use

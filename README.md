@@ -34,9 +34,10 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
   Windows `ProxyOverride` list, macOS `ExceptionsList`, GNOME `ignore-hosts` and KDE
   `NoProxyFor`: host suffixes, globs, CIDR (IPv4 and IPv6), ports, `<local>`.
 - **PAC support** — the full Netscape PAC utility-function set (including
-  `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions, runnable either
-  as real JavaScript through a pluggable engine (`dukpy` or `quickjs`, picked via
-  `PROXYLIB_JS_ENGINE` or preferring `quickjs` if installed) or by subclassing in Python.
+  `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions. Scripts run as
+  real JavaScript (`quickjs` or `dukpy`) in a helper process with a time limit, so a
+  hostile or broken PAC cannot hang your program; a Python function can stand in for
+  `FindProxyForURL` too.
 - **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup. Used directly by
   `system_proxy()` on any platform/desktop whose own auto-detect setting is on, and as
   a generic last-resort fallback in `auto_proxy()` when nothing else is configured.
@@ -67,10 +68,10 @@ Optional extras:
 | `proxylib[pac]` | `quickjs-ng` (Python ≥3.10) / `quickjs` (Python 3.9) | Executing PAC files as JavaScript (preferred engine) |
 | `proxylib[dukpy]` | `dukpy` | The `dukpy` JS engine, for platforms without a quickjs wheel (Windows ARM64) |
 
-Without a JS engine installed, PAC files are still fetched and validated, but evaluate
-to `DIRECT` (with a warning) since there's no engine to run them. With more than one
-installed, `quickjs` is preferred by default; set `PROXYLIB_JS_ENGINE=dukpy` (or a
-comma-separated priority list) to change that.
+Without a JS engine installed, loading a PAC raises `MissingExtraError` naming the
+extra to install; pass `on_missing_engine="direct"` to get a warning and DIRECT
+instead. With both installed, `quickjs` is preferred; set `PROXYLIB_JS_ENGINE=dukpy`
+(or a comma-separated priority list) to change that.
 
 ## Quick start
 
@@ -156,12 +157,17 @@ direct = SimpleProxyMap("DIRECT")
 ### Loading a PAC file directly
 
 ```python
-from proxylib import load_pac
+import proxylib
+from proxylib import load_pac, loads_pac
 
-proxymap = load_pac("https://example.com/proxy.pac")
-proxymap = load_pac("file:./proxy.pac")
-proxymap["https://example.com/"]
+proxymap = load_pac("https://example.com/proxy.pac")  # a URL
+proxymap = load_pac("./proxy.pac")                      # or a path
+proxymap = loads_pac(script_text)                       # or the script itself
+proxylib.lookup(proxymap, "https://example.com/")
 ```
+
+A script runs with a 1-second budget per call (`script_timeout=`); one that overruns
+raises `PACError` and stays failed. A script error is `PACError` too.
 
 `ProxyMap(value)` picks the right map for a configured value without doing any
 I/O: a proxy URL or PAC result string builds a `SimpleProxyMap`, a PAC location (a
@@ -192,16 +198,15 @@ lookup(proxymap, "https://example.com/")  # -> (Proxy(scheme='http', host='corp-
 | `proxylib.os` | `system_proxy()` / `auto_proxy()` — platform dispatch + WPAD fallback |
 | `proxylib.os.nt` / `.darwin` | Windows (WinHTTP API) / macOS (`scutil`) system proxy backends |
 | `proxylib.os.posix` | Linux dispatch: `.libproxy`, `.gnome`, `.mate`, `.kde`, `.networkmanager` |
-| `proxylib.pac` | `PAC`, `JSProxyAutoConfig`, `load()` — PAC utility functions + evaluation |
+| `proxylib.pac` | `PacScript`, `PacProxyMap`, `load()`, `loads()`, `functions` — PAC scripts and builtins |
 | `proxylib.pac.wpad` | `discover()` — DNS+HTTP WPAD auto-discovery |
-| `proxylib.pac.javascript` | `JSContext` — runs a PAC script against a pluggable engine |
-| `proxylib.pac.engines` | `JSEngine` interface, plus the `dukpy`/`quickjs` backends |
+| `proxylib.pac.engines` | `JSEngine` interface, `names()`, engine selection |
 | `proxylib.integrations.requests` | `ProxyMapAdapter` — the recommended `requests` integration |
 | `proxylib.integrations.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
 | `proxylib.integrations.dict` | `ProxyDict` — the plain proxies-dict integration |
 | `proxylib.exceptions` | `ProxylibError` and its subclasses (re-exported at top level) |
 
-Every `ProxyMap` implementation (`SimpleProxyMap`, `EnvProxyConfig`, `PAC`, ...) answers
+Every `ProxyMap` implementation (`SimpleProxyMap`, `EnvProxyConfig`, `PacProxyMap`, ...) answers
 the same question: `proxymap[url]` returns the sequence of `Proxy` (or `None` for
 DIRECT) to try, in order.
 

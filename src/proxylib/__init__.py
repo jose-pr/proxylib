@@ -16,9 +16,10 @@ from .integrations.urllib import ProxyMapHandler as ProxyMapHandler
 from .os import auto_proxy as auto_proxy
 from .os import system_proxy as system_proxy
 from .os.posix.libproxy import LibProxyMap as LibProxyMap
-from .pac import PAC as PAC
-from .pac import JSProxyAutoConfig as JSProxyAutoConfig
+from .pac import PacProxyMap as PacProxyMap
+from .pac import PacScript as PacScript
 from .pac import load as load_pac
+from .pac import loads as loads_pac
 from .pac.wpad import discover as discover_pac
 from .patching import patch as patch
 from .patching import register_patcher as register_patcher
@@ -37,11 +38,11 @@ __all__ = (
     "ChainProxyMap",
     "ConfigurableProxyMap",
     "EnvProxyConfig",
-    "JSProxyAutoConfig",
     "LibProxyMap",
     "MissingExtraError",
     "NoReachableProxyError",
-    "PAC",
+    "PacProxyMap",
+    "PacScript",
     "PACError",
     "Proxy",
     "ProxyAnswer",
@@ -57,6 +58,7 @@ __all__ = (
     "clear_caches",
     "discover_pac",
     "load_pac",
+    "loads_pac",
     "lookup",
     "patch",
     "register_patcher",

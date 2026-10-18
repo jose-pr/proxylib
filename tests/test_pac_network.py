@@ -5,7 +5,10 @@ import urllib.error
 
 import pytest
 
+import proxylib
 import proxylib.pac as pac
+import proxylib.pac.engines as engines
+import proxylib.pac.script as script_module
 import proxylib.pac.wpad as wpad
 
 _SCRIPT = b'function FindProxyForURL(url, host) { return "PROXY p:1"; }'
@@ -13,11 +16,9 @@ _SCRIPT = b'function FindProxyForURL(url, host) { return "PROXY p:1"; }'
 
 @pytest.fixture(autouse=True)
 def fresh_caches():
-    pac.clear_download_cache()
-    wpad._cache.clear()
+    proxylib.clear_caches()
     yield
-    pac.clear_download_cache()
-    wpad._cache.clear()
+    proxylib.clear_caches()
 
 
 def test_load_fetches_a_script_and_ignores_proxy_env(http_server, monkeypatch):
@@ -36,13 +37,13 @@ def test_load_raises_on_http_error(http_server):
 
 def test_load_raises_when_the_body_is_not_a_pac(http_server):
     http_server.route("/page.html", b"<html>login</html>")
-    with pytest.raises(ValueError, match="FindProxyForURL"):
+    with pytest.raises(proxylib.PACError, match="FindProxyForURL"):
         pac.load(http_server.url("/page.html"))
 
 
 def test_load_raises_on_an_oversized_body(http_server):
     http_server.route("/big.pac", _SCRIPT + b" " * (1024 * 1024))
-    with pytest.raises(ValueError, match="larger than"):
+    with pytest.raises(proxylib.PACError, match="larger than"):
         pac.load(http_server.url("/big.pac"))
 
 
@@ -61,11 +62,13 @@ def test_load_raises_when_nothing_listens():
         pac.load(f"http://127.0.0.1:{port}/proxy.pac", timeout=0.5)
 
 
-def test_load_without_an_engine_warns_and_returns_direct(http_server, monkeypatch):
-    monkeypatch.setattr(pac, "_have_engine", False)
+def test_load_without_an_engine_raises_unless_told_to_go_direct(http_server, monkeypatch):
+    monkeypatch.setattr(engines, "_installed", lambda name: False)
     http_server.route("/proxy.pac", _SCRIPT)
+    with pytest.raises(proxylib.MissingExtraError):
+        pac.load(http_server.url("/proxy.pac"))
     with pytest.warns(UserWarning):
-        result = pac.load(http_server.url("/proxy.pac"))
+        result = pac.load(http_server.url("/proxy.pac"), on_missing_engine="direct")
     assert result["http://example.com/"] == (None,)
 
 
@@ -73,7 +76,7 @@ def test_load_does_not_cache_file_urls(tmp_path):
     script = tmp_path / "proxy.pac"
     script.write_bytes(_SCRIPT)
     pac.load(script.as_uri())
-    assert pac._download_cache == {}
+    assert script_module._download_cache == {}
 
 
 def test_wpad_tries_the_next_domain_when_a_fetch_fails(http_server, monkeypatch):

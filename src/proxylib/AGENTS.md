@@ -18,7 +18,7 @@ proxylib base class is needed. `proxymap[url]` answers with:
 - or it **raises `KeyError`**: no opinion (a chain asks the next map).
 
 Read an answer with **`lookup(proxymap, url)`**, never by indexing yourself. Every
-built-in map returns `tuple[Proxy | None, ...]`. `SimpleProxyMap` and `PAC` always
+built-in map returns `tuple[Proxy | None, ...]`. `SimpleProxyMap` and `PacProxyMap` always
 answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable set.
 
 ## Core types (`proxylib.proxy`, re-exported at top level)
@@ -152,46 +152,53 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 
 ## PAC support (`proxylib.pac`)
 
-- **`PAC`** — base utility-function namespace (`dnsResolve`, `dnsResolveEx`,
-  `myIpAddress`, `myIpAddressEx`, `dnsDomainLevels`, `isInNet`/`isInNetEx`,
-  `isResolvable`/`isResolvableEx`, `dateRange`, `timeRange`, `shExpMatch`,
-  `sortIpAddressList`, `getClientVersion`, ...) implementing the full Netscape PAC set
-  plus Microsoft's `*Ex` extensions. A proxy map. `shExpMatch` treats only `*` and
-  `?` as wildcards and is case-sensitive on every platform, as in browsers. The
-  script's result is read with `Proxy.parse_pac_result` (a non-string result is
-  DIRECT).
-  `FindProxyForURL` here always returns `"DIRECT"` —
-  subclass and override it, or use `JSProxyAutoConfig`, to actually select proxies.
-  `dnsResolve(host, cache_ttl=30.0)` — per-host cached; `cache_ttl=0`/`None` forces a
-  fresh lookup.
-- **`JSProxyAutoConfig`** (only defined if a JS engine is installed, else `None`) — a
-  `PAC` subclass whose `FindProxyForURL` (and the utility functions) run as real
-  JavaScript against whichever engine `pac.engines.get_engine_class()` picks; calls
-  into the engine are serialised per instance, so one map is safe to share between
-  threads. Which
-  engine: the `PROXYLIB_JS_ENGINE` env var, a **comma-separated** priority list (e.g.
-  `"dukpy,quickjs"`); unset defaults to `("quickjs", "dukpy")`. `proxylib[pac]`
-  installs `quickjs`/`quickjs-ng` depending on the Python version; `proxylib[dukpy]`
-  installs `dukpy` (the one with a Windows ARM64 wheel).
-- **`load(url, cache_ttl=300.0, **urllib_kwds) -> PAC`** (top-level alias:
-  `proxylib.load_pac`) — load a PAC script from a URL, a `file:` path, or inline JS
-  source (detected via a `"FindProxyForURL("` substring check). Without a JS engine
-  installed, warns and returns an always-DIRECT `PAC()`. Genuine network downloads
-  (not `file:`/inline) are cached per URL for `cache_ttl` seconds; `cache_ttl=0`/`None`
-  forces a fresh fetch. A download times out after 10 s unless `timeout=` is passed;
-  a body over 1 MiB raises `ValueError`; a non-UTF-8 body is decoded as Latin-1.
-  Raises `ValueError` if the fetched/read source has no
-  `FindProxyForURL`. The fetch **bypasses any configured proxy** (chicken-and-egg
-  avoidance, matches browser PAC-fetch behavior).
-- **`clear_download_cache()`** / **`clear_dns_cache()`** — test/cache-busting seams.
-- **`discover(fqdn=None, timeout=3.0, cache_ttl=300.0, **urllib_kwds) -> PAC | None`**
-  (`proxylib.pac.wpad`, top-level alias: `proxylib.discover_pac`) — DNS+HTTP WPAD
-  discovery: tries `http://wpad.<domain>/wpad.dat` for each parent domain of `fqdn`
-  (default: this host's FQDN), most-specific first, stopping before a public suffix
-  (a bare TLD or a ccTLD registry level such as `co.uk`). Returns the
-  first successfully loaded `PAC`, or `None`. Results (including "not found") are
-  cached per fqdn for `cache_ttl` seconds. **DHCP option 252 discovery is not
-  implemented** (no portable stdlib path to OS DHCP lease data) — DNS+HTTP only.
+- **`load(location, *, timeout=10.0, cache_ttl=300.0, script_timeout=1.0, engine=None,
+  on_missing_engine="raise") -> PacProxyMap`** (top-level `proxylib.load_pac`) — the
+  PAC at a URL (`http`, `https`, `file`) or a path (`str`/`os.PathLike`; `file:path`
+  without `//` is a path). Never script text. `timeout` bounds the download; the
+  fetch **never goes through a proxy**; a body over 1 MiB raises `PACError`; UTF-8
+  with a Latin-1 fallback; downloads (not `file:`) are cached per URL for
+  `cache_ttl` seconds.
+- **`loads(text, *, script_timeout=1.0, engine=None, on_missing_engine="raise") ->
+  PacProxyMap`** (top-level `proxylib.loads_pac`) — the PAC from script text.
+- **`PacScript(source, *, engine=None, functions=None, timeout=1.0,
+  on_missing_engine="raise")`** — one script, run in a **helper Python process**
+  (`sys.executable`) so it can be stopped: neither engine can be interrupted
+  in-process. `.find_proxy_for_url(url, host) -> str` (a non-string result is
+  `"DIRECT"`). `timeout` bounds each call (and loading): an overrun ends the helper,
+  raises `PACError`, and every later call raises `PACError` at once. A script
+  error, or a script with no `FindProxyForURL` function, raises `PACError`.
+  `functions` adds to or overrides the builtins and must be picklable module-level
+  functions the helper can import. No engine installed: `"raise"` →
+  `MissingExtraError` (extra `pac`), `"direct"` → `UserWarning` and every answer is
+  `"DIRECT"`. Thread-safe (calls are serialised); `.close()` ends the helper
+  (garbage collection does too). `PacScript.from_file(path, *, encoding="utf-8-sig",
+  **options)`, `PacScript.from_url(url, *, timeout=10.0, max_bytes=MAX_PAC_BYTES,
+  cache_ttl=300.0, **options)` (the script budget is `script_timeout=` there).
+- **`PacProxyMap(script, *, browser_compatibility=False)`** — the proxy map; `script`
+  is a `PacScript` or any `callable(url, host) -> str` (a Python `FindProxyForURL`).
+  `host` is the URL's host, lower-cased; the full URL is passed, except that
+  `browser_compatibility=True` reduces an `https` URL to `https://host/` (Chrome and
+  Firefox privacy rule). Answers through `Proxy.parse_pac_result`; never `KeyError`.
+- **`functions`** — read-only mapping of the PAC builtins by their PAC names (the
+  Netscape set — `dnsResolve`, `myIpAddress`, `isInNet`, `shExpMatch`,
+  `dnsDomainIs`, `weekdayRange`, `dateRange`, `timeRange`, ... — plus Microsoft's
+  `*Ex` functions, `sortIpAddressList`, `getClientVersion`). `shExpMatch` treats only
+  `*` and `?` as wildcards and is case-sensitive, as in browsers. `dnsResolve` caches
+  answers and failures for 30 s (`clear_caches()` drops them).
+- **`proxylib.pac.engines`** — `names()` (installed engines), `get_engine(name=None)`,
+  `JSEngine` protocol. Selection: `engine=`, else `PROXYLIB_JS_ENGINE` (comma-separated
+  priority list), else quickjs then dukpy; an unknown name raises `ValueError`.
+  Neither engine is imported until a script needs it. `proxylib[pac]` installs
+  `quickjs-ng` (Python 3.10+) / `quickjs` (3.9); `proxylib[dukpy]` installs `dukpy`
+  (the one with a Windows ARM64 wheel).
+- **`discover(fqdn=None, *, timeout=3.0, cache_ttl=300.0, on_missing_engine="raise")
+  -> PacProxyMap | None`** (`proxylib.pac.wpad`, top-level `proxylib.discover_pac`) —
+  DNS+HTTP WPAD: tries `http://wpad.<domain>/wpad.dat` for each parent domain of
+  `fqdn` (default: this host's FQDN), most specific first, stopping before a public
+  suffix (a bare TLD or a ccTLD registry level such as `co.uk`); a domain whose PAC
+  fails to download or run is skipped. Results, failures included, are cached per
+  fqdn. **DHCP option 252 is not implemented.**
 
 ## Global patching (`proxylib.patching`)
 

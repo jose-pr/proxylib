@@ -3,9 +3,9 @@ real dukpy JS engine and exercise every PAC utility function via
 FindProxyForURL, not just the Python-level unit tests in test_pac.py.
 
 The main thing these catch that direct unit tests can't: a PAC utility
-function that isn't correctly exported into the JS engine (JSContextMeta
-bugs, a missing/misnamed export) raises inside dukpy the moment a real PAC
-script calls it -- these tests call every function via an actual script.
+function that isn't correctly exported into the JS engine (a missing or
+misnamed export) raises inside the engine the moment a real PAC script calls
+it -- these tests call every function via an actual script.
 """
 
 import pytest

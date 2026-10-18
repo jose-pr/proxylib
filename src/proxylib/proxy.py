@@ -351,7 +351,7 @@ class _LazyPacMap:
                 if self._pac is None:
                     from . import pac
 
-                    self._pac = pac.load(self.source)
+                    self._pac = pac._load_any(self.source)
         return lookup(self._pac, url)
 
 

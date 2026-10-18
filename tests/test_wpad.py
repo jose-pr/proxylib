@@ -1,7 +1,7 @@
 import pytest
 
 import proxylib.pac.wpad as wpad
-from proxylib.pac import PAC
+from proxylib.pac import PacProxyMap
 from proxylib.pac.wpad import _candidate_domains, discover
 
 
@@ -56,7 +56,7 @@ def test_discover_loads_pac_from_first_resolving_wpad_host(monkeypatch):
         lambda host, **kw: ipaddress.ip_address("10.0.0.1") if host == "wpad.example.com" else None,
     )
 
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
 
     def fake_load(url, **kwargs):
         assert url == "http://wpad.example.com/wpad.dat"
@@ -71,7 +71,7 @@ def test_discover_loads_pac_from_first_resolving_wpad_host(monkeypatch):
 def test_discover_caches_result(monkeypatch):
     calls = []
 
-    def counting_probe(fqdn, timeout, **kwargs):
+    def counting_probe(fqdn, timeout, on_missing_engine):
         calls.append(fqdn)
         return None
 
@@ -83,9 +83,9 @@ def test_discover_caches_result(monkeypatch):
 
 
 def test_discover_caches_negative_results_separately_per_fqdn(monkeypatch):
-    sentinel = PAC()
+    sentinel = PacProxyMap(lambda url, host: "DIRECT")
     monkeypatch.setattr(
-        wpad, "_discover", lambda fqdn, timeout, **k: sentinel if "hit" in fqdn else None
+        wpad, "_discover", lambda fqdn, timeout, on_missing_engine: sentinel if "hit" in fqdn else None
     )
 
     assert discover("host.hit.example.com") is sentinel
@@ -98,7 +98,7 @@ def test_discover_caches_negative_results_separately_per_fqdn(monkeypatch):
 
 def test_discover_cache_ttl_zero_disables_caching(monkeypatch):
     calls = []
-    monkeypatch.setattr(wpad, "_discover", lambda fqdn, timeout, **k: calls.append(1))
+    monkeypatch.setattr(wpad, "_discover", lambda fqdn, timeout, on_missing_engine: calls.append(1))
 
     discover("host.corp.example.com", cache_ttl=0)
     discover("host.corp.example.com", cache_ttl=0)
@@ -107,7 +107,7 @@ def test_discover_cache_ttl_zero_disables_caching(monkeypatch):
 
 def test_discover_cache_expires(monkeypatch):
     calls = []
-    monkeypatch.setattr(wpad, "_discover", lambda fqdn, timeout, **k: calls.append(1))
+    monkeypatch.setattr(wpad, "_discover", lambda fqdn, timeout, on_missing_engine: calls.append(1))
 
     clock = [1000.0]
     monkeypatch.setattr(wpad.time, "monotonic", lambda: clock[0])
