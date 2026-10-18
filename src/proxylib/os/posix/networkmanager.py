@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from ...pac.wpad import discover as _wpad_discover
 from ...proxy import ProxyMap
@@ -166,7 +166,7 @@ def _proxy_settings_via_dbus_send() -> "Optional[Dict[str, str]]":
     return None
 
 
-def _resolve(settings: "Dict[str, str]") -> "ProxyMap|str|None":
+def _resolve(settings: "Dict[str, str]") -> "Optional[Union[ProxyMap, str]]":
     if settings.get("method") != "auto":
         return None
     pac_url = settings.get("pac-url", "")
@@ -179,6 +179,6 @@ def _resolve(settings: "Dict[str, str]") -> "ProxyMap|str|None":
     return _wpad_discover()
 
 
-def detect() -> "ProxyMap|str|None":
+def detect() -> "Optional[Union[ProxyMap, str]]":
     settings = _proxy_settings_via_nmcli() or _proxy_settings_via_dbus_send()
     return _resolve(settings) if settings else None

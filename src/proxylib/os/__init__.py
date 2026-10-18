@@ -20,7 +20,7 @@ Both :func:`system_proxy` and :func:`auto_proxy` take a ``provider``:
 from __future__ import annotations
 
 import sys
-from typing import Optional
+from typing import Optional, Union
 
 from ..pac import load as load_pac
 from ..proxy import ProxyMap, SimpleProxyMap
@@ -57,7 +57,7 @@ def _native_system_provider() -> "Optional[ProxyMap]":
 _PROVIDERS = ("python", "system")
 
 
-def system_proxy(provider: str = "python") -> "ProxyMap|str":
+def system_proxy(provider: str = "python") -> "Union[ProxyMap, str]":
     """Read this machine's proxy configuration. See the module docstring
     for what ``provider`` means. Any other ``provider`` raises ``ValueError``."""
     if provider not in _PROVIDERS:

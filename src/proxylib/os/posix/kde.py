@@ -5,7 +5,7 @@ from __future__ import annotations
 import configparser
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from ...env import EnvProxyConfig
 from ...pac.wpad import discover as _wpad_discover
@@ -41,7 +41,7 @@ def _read_proxy_settings() -> "Optional[configparser.SectionProxy]":
     return parser["Proxy Settings"] if parser.has_section("Proxy Settings") else None
 
 
-def _host_port(section: "configparser.SectionProxy", key: str) -> "str|None":
+def _host_port(section: "configparser.SectionProxy", key: str) -> "Optional[str]":
     # KDE stores these as "scheme://host port" (space-separated port, not a
     # "host:port" URL) -- e.g. "http://proxy.example.com 8080".
     parts = section.get(key, "").split()
@@ -50,7 +50,7 @@ def _host_port(section: "configparser.SectionProxy", key: str) -> "str|None":
     return f"{parts[0]}:{parts[1]}" if len(parts) > 1 else parts[0]
 
 
-def detect() -> "ProxyMap|str|None":
+def detect() -> "Optional[Union[ProxyMap, str]]":
     section = _read_proxy_settings()
     if section is None:
         return None

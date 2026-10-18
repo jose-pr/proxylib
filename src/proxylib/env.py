@@ -39,7 +39,7 @@ _NoProxyEntry = Union[Tuple[str, Optional[int]], _NoProxyNetwork, _Wildcard, Non
 _default_no_proxy: "List[str]" = []
 
 
-def set_default_no_proxy(rules: "Iterable[str]|None") -> None:
+def set_default_no_proxy(rules: "Optional[Iterable[str]]") -> None:
     """Set the process-wide default ``NO_PROXY`` rules (same entry syntax as the
     env var: hostnames, ``.suffix``, ``<local>``, CIDR). Merged with -- not
     replaced by -- whatever rules each ``EnvProxyConfig``/``ConfigurableProxyMap``
@@ -100,7 +100,7 @@ def _parse_no_proxy_entry(entry: str) -> _NoProxyEntry:
     return host, (int(port) if port.isdigit() else None)
 
 
-def _no_proxy_matches(host: str, port: "int|None", entry: "Tuple[str, int|None]") -> bool:
+def _no_proxy_matches(host: str, port: "Optional[int]", entry: "Tuple[str, Optional[int]]") -> bool:
     """True if a NO_PROXY entry (host[, port]) covers this request's host/port.
 
     Follows the common curl/requests convention: an entry matches the
@@ -131,9 +131,9 @@ class EnvProxyConfig(ProxyMap):
 
     def __init__(
         self,
-        http_proxy: "str|Proxy|None",
-        https_proxy: "str|Proxy|None",
-        no_proxy: "Iterable[str]|None",
+        http_proxy: "Optional[Union[str, Proxy]]",
+        https_proxy: "Optional[Union[str, Proxy]]",
+        no_proxy: "Optional[Iterable[str]]",
     ) -> None:
         # SimpleProxyMap directly, not the ProxyMap factory: proxy env var
         # values are never PAC sources (PROXY_PAC/AutoConfigURL cover that
@@ -167,7 +167,7 @@ class EnvProxyConfig(ProxyMap):
         # Resolve DNS lazily: get_ip() is a blocking gethostbyname() call,
         # only needed for "<local>" entries -- don't pay it per lookup when
         # no_proxy has none (the overwhelmingly common case).
-        ip_literal: "_ip.IPv4Address|_ip.IPv6Address|None" = None
+        ip_literal: "Optional[Union[_ip.IPv4Address, _ip.IPv6Address]]" = None
         ip_literal_checked = False
         for entry in self.no_proxy:
             if entry is None:

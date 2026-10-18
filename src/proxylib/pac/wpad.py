@@ -91,7 +91,7 @@ def _discover(fqdn: str, timeout: float, **urllib_kwds) -> "Optional[PAC]":
 def discover(
     fqdn: "Optional[str]" = None,
     timeout: float = 3.0,
-    cache_ttl: "float|None" = 300.0,
+    cache_ttl: "Optional[float]" = 300.0,
     **urllib_kwds,
 ) -> "Optional[PAC]":
     """Try each ``http://wpad.<domain>/wpad.dat`` from most to least specific.

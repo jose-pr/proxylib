@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Union
 
 from . import netutils
 
@@ -111,7 +111,7 @@ class URL(_URI):
     _DEFAULT_SCHEME = "http"
 
     def __new__(
-        cls, scheme: str, username: str, password: str, host: str, port: "str|int|None"
+        cls, scheme: str, username: str, password: str, host: str, port: "Optional[Union[str, int]]"
     ) -> "URL":
         scheme = (scheme or "").lower()
         if not scheme:

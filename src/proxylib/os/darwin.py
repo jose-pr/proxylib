@@ -9,7 +9,7 @@ import ctypes
 import ctypes.util
 import subprocess
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from ..env import EnvProxyConfig
 from ..pac.wpad import discover as _wpad_discover
@@ -68,7 +68,7 @@ def _read_scutil_proxy() -> "Dict[str, Any]":
     return settings
 
 
-def system_proxy() -> "ProxyMap|str":
+def system_proxy() -> "Union[ProxyMap, str]":
     """Read proxy settings from macOS's System Configuration via ``scutil --proxy``.
 
     Mirrors macOS's own Network preferences precedence: if "Auto Proxy

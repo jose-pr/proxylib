@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
-from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
 
 from ..env import EnvProxyConfig
 from ..pac.wpad import discover as _wpad_discover
@@ -159,7 +159,7 @@ def _manual_proxy_map(settings: "_IEProxySettings") -> "Optional[ProxyMap]":
     )
 
 
-def system_proxy() -> "ProxyMap|str":
+def system_proxy() -> "Union[ProxyMap, str]":
     """Read proxy settings the way Windows/IE/Edge do.
 
     Mirrors Windows' own precedence: if "Automatically detect settings" is

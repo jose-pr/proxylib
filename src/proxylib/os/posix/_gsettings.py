@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 from ...env import EnvProxyConfig
 from ...pac.wpad import discover as _wpad_discover
@@ -79,7 +79,7 @@ def _gsettings_list_recursively(schema: str) -> "Dict[Tuple[str, str], str]":
     return values
 
 
-def _gsettings_get(schema: str, key: str) -> "str|None":
+def _gsettings_get(schema: str, key: str) -> "Optional[str]":
     """Look up one gsettings key, batching reads via ``list-recursively``.
 
     One recursive call on the base schema (``org.gnome.system.proxy``)
@@ -100,7 +100,7 @@ def _gsettings_get(schema: str, key: str) -> "str|None":
     return values.get((schema, key))
 
 
-def read_desktop_proxy(schema: str) -> "ProxyMap|str|None":
+def read_desktop_proxy(schema: str) -> "Optional[Union[ProxyMap, str]]":
     """Read a GNOME/MATE-shaped ``<schema>``/``<schema>.http``/``<schema>.https`` proxy config."""
     mode = _gsettings_get(schema, "mode")
     if mode is None:
@@ -116,7 +116,7 @@ def read_desktop_proxy(schema: str) -> "ProxyMap|str|None":
     if mode != "manual":
         return None
 
-    def host_port(protocol: str) -> "str|None":
+    def host_port(protocol: str) -> "Optional[str]":
         host = _gsettings_get(f"{schema}.{protocol}", "host")
         port = _gsettings_get(f"{schema}.{protocol}", "port")
         if not host:

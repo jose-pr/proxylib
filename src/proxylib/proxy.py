@@ -41,10 +41,10 @@ class Proxy(_URI):
     def __new__(
         cls,
         scheme: str,
-        username: "str|None",
-        password: "str|None",
-        host: "str|None",
-        port: "str|int|None",
+        username: "Optional[str]",
+        password: "Optional[str]",
+        host: "Optional[str]",
+        port: "Optional[Union[str, int]]",
     ) -> "Optional[Proxy]":
         scheme = (scheme or "").lower()
         if scheme == "direct":
@@ -103,7 +103,7 @@ class ProxyMap(Protocol):
     """
 
     def __new__(cls, *args, **kwargs):
-        src: "str|Proxy|None" = args[0] if args else None
+        src: "Optional[Union[str, Proxy]]" = args[0] if args else None
         if cls is ProxyMap:
             if isinstance(src, str):
                 looks_like_pac_source = _looks_like_pac_source(src)
@@ -178,7 +178,7 @@ def _looks_like_pac_source(src: str) -> bool:
 class SimpleProxyMap(ProxyMap):
     """A ``ProxyMap`` that always returns the same fixed proxy (or list of proxies)."""
 
-    def __init__(self, proxy: "Proxy|Sequence[Optional[Proxy]]|str|None" = None) -> None:
+    def __init__(self, proxy: "Optional[Union[Proxy, Sequence[Optional[Proxy]], str]]" = None) -> None:
         if isinstance(proxy, str):
             # PAC-style strings ("DIRECT", "PROXY host:port; DIRECT") have no
             # "://"; URL-style strings ("http://host:port", the conventional
@@ -242,13 +242,13 @@ class ConfigurableProxyMap(ProxyMap):
         self,
         proxymap: ProxyMap,
         *,
-        cache_ttl: "float|None" = None,
+        cache_ttl: "Optional[float]" = None,
         probe: bool = False,
         probe_timeout: float = 5.0,
         round_robin: bool = False,
         browser_compatibility: bool = False,
         bypass_local: bool = False,
-        no_proxy: "Iterable[str]|None" = None,
+        no_proxy: "Optional[Iterable[str]]" = None,
         cache_maxsize: int = 1024,
     ) -> None:
         self.proxymap = proxymap

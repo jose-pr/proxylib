@@ -19,6 +19,7 @@ from typing import Iterable as _Iter
 from typing import Literal as _Literal
 from typing import Optional as _Optional
 from typing import Tuple as _Tuple
+from typing import Union as _Union
 from typing import cast as _cast
 from typing import overload as _overload
 from urllib.parse import urlparse
@@ -96,7 +97,7 @@ class PAC(ProxyMap):
 
     #### UTILITY FUNCTIONS ####
     @staticmethod
-    def dnsResolve(host: str, /, cache_ttl: float = 30.0) -> "str|None":
+    def dnsResolve(host: str, /, cache_ttl: float = 30.0) -> "_Optional[str]":
         """Resolve host to a single IPv4/IPv6 address string, or None.
 
         Cached per host for ``cache_ttl`` seconds (default 30); pass
@@ -153,15 +154,15 @@ class PAC(ProxyMap):
 
     #### TIME FUNCTIONS ####
     @_overload
-    def weekdayRange(wd1: _WEEKDAY, gmt: 'None|_Literal["GMT"]' = None, /) -> bool: ...
+    def weekdayRange(wd1: _WEEKDAY, gmt: "_Optional[_Literal['GMT']]" = None, /) -> bool: ...
 
     @_overload
     def weekdayRange(
-        wd1: _WEEKDAY, wd2: _WEEKDAY, gmt: 'None|_Literal["GMT"]' = None, /
+        wd1: _WEEKDAY, wd2: _WEEKDAY, gmt: "_Optional[_Literal['GMT']]" = None, /
     ) -> bool: ...
 
     @staticmethod
-    def weekdayRange(wd1: _WEEKDAY, /, *args: '_WEEKDAY|_Literal["GMT"]') -> bool:
+    def weekdayRange(wd1: _WEEKDAY, /, *args: "_Union[_WEEKDAY, _Literal['GMT']]") -> bool:
         args = list(args)
         gmt = bool(args) and args[-1].upper() == "GMT"
         if gmt:
@@ -408,7 +409,7 @@ def clear_download_cache() -> None:
     _download_cache.clear()
 
 
-def load(url: str, cache_ttl: "float|None" = 300.0, **urllib_kwds) -> PAC:
+def load(url: str, cache_ttl: "_Optional[float]" = 300.0, **urllib_kwds) -> PAC:
     """Load a PAC script from a URL, a ``file:`` path, or inline JS source.
 
     Requires a JS engine -- ``proxylib[jspac]`` (dukpy) or

@@ -79,7 +79,7 @@ except ImportError:
 _interfaces_cache: "Optional[Tuple[float, List[_Interface]]]" = None
 
 
-def get_local_interfaces(cache_ttl: "float|None" = 10.0) -> "List[_Interface]":
+def get_local_interfaces(cache_ttl: "Optional[float]" = 10.0) -> "List[_Interface]":
     """Return this host's local network interfaces, cached for ``cache_ttl`` seconds.
 
     Pass ``cache_ttl=0``/``None`` to force a fresh enumeration.
@@ -101,7 +101,7 @@ def clear_interfaces_cache() -> None:
     _interfaces_cache = None
 
 
-def get_ip(address: str) -> "_ip.IPv4Address|_ip.IPv6Address|None":
+def get_ip(address: str) -> "Optional[Union[_ip.IPv4Address, _ip.IPv6Address]]":
     """Resolve a hostname or literal address to an ip_address, or None."""
     try:
         try:
@@ -112,7 +112,7 @@ def get_ip(address: str) -> "_ip.IPv4Address|_ip.IPv6Address|None":
         return None
 
 
-def is_loopback_or_link_local(ip: "_ip.IPv4Address|_ip.IPv6Address") -> bool:
+def is_loopback_or_link_local(ip: "Union[_ip.IPv4Address, _ip.IPv6Address]") -> bool:
     """True for loopback (``127/8``, ``::1``) or link-local (``169.254/16``,
     ``fe80::/10``) addresses -- these can never usefully go through a proxy
     (link-local is inherently confined to the local link). Shared by
@@ -133,7 +133,7 @@ _DEFAULT_PORTS = {
 }
 
 
-def get_default_port(scheme: str) -> "int|None":
+def get_default_port(scheme: str) -> "Optional[int]":
     """Return the conventional port for a scheme, or None if unknown."""
     scheme = scheme.lower()
     if scheme in _DEFAULT_PORTS:
@@ -160,7 +160,7 @@ def clear_circuit_breaker() -> None:
 def first_working_proxy(
     proxies: "Iterable[Optional[Proxy]]",
     timeout: float = 5.0,
-    circuit_breaker_ttl: "float|None" = 30.0,
+    circuit_breaker_ttl: "Optional[float]" = 30.0,
     clock: "Callable[[], float]" = _time.monotonic,
 ) -> "Optional[Proxy]":
     """Return the first entry that accepts a TCP connection, in order.

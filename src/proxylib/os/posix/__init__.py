@@ -19,6 +19,7 @@ Other desktop environments (Xfce, Cinnamon, ...) aren't covered directly
 from __future__ import annotations
 
 import os
+from typing import Union
 
 from ...env import EnvProxyConfig
 from ...proxy import ProxyMap, SimpleProxyMap
@@ -32,7 +33,7 @@ __all__ = ("system_proxy",)
 _DESKTOP_BACKENDS = (libproxy, gnome, mate, kde, networkmanager)
 
 
-def system_proxy() -> "ProxyMap|str":
+def system_proxy() -> "Union[ProxyMap, str]":
     """``PROXY_PAC``/``HTTP_PROXY``-family env vars, with best-effort desktop checks."""
     pac = os.environ.get("PROXY_PAC")
     if pac:
