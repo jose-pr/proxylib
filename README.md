@@ -10,7 +10,7 @@ settings, evaluate PAC (Proxy Auto-Config) files — including WPAD auto-discove
 wire the result straight into [`requests`](https://requests.readthedocs.io/) or
 [`urllib`](https://docs.python.org/3/library/urllib.request.html).
 
-Zero required runtime dependencies; a couple of optional extras unlock more (see below).
+One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) (network helpers, itself dependency-free); optional extras add a PAC JavaScript engine (see below).
 
 ## Features
 
@@ -64,10 +64,8 @@ Optional extras:
 
 | Extra | Adds | Needed for |
 | --- | --- | --- |
-| `proxylib[jspac]` | `dukpy` | Executing PAC files as JavaScript — "any working engine" meta-extra |
-| `proxylib[dukpy]` | `dukpy` | The `dukpy` JS engine specifically |
-| `proxylib[quickjs]` | `quickjs-ng` (Python ≥3.10) / `quickjs` (Python 3.9) | The `quickjs` JS engine specifically (no dependency on `dukpy`) |
-| `proxylib[ifaddr]` | `ifaddr` | Accurate local network interface/prefix enumeration (used by `NO_PROXY <local>`) |
+| `proxylib[pac]` | `quickjs-ng` (Python ≥3.10) / `quickjs` (Python 3.9) | Executing PAC files as JavaScript (preferred engine) |
+| `proxylib[dukpy]` | `dukpy` | The `dukpy` JS engine, for platforms without a quickjs wheel (Windows ARM64) |
 
 Without a JS engine installed, PAC files are still fetched and validated, but evaluate
 to `DIRECT` (with a warning) since there's no engine to run them. With more than one
@@ -185,7 +183,7 @@ like a PAC file/URL is loaded with `load_pac`.
 | `proxylib.integrations.requests` | `ProxyMapAdapter` — the recommended `requests` integration |
 | `proxylib.integrations.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
 | `proxylib.integrations.dict` | `ProxyDict` — the plain proxies-dict integration |
-| `proxylib.netutils` | `get_ip`, `get_default_port`, `get_local_interfaces`, `first_working_proxy` |
+| `proxylib.exceptions` | `ProxylibError` and its subclasses (re-exported at top level) |
 
 Every `ProxyMap` implementation (`SimpleProxyMap`, `EnvProxyConfig`, `PAC`, ...) answers
 the same question: `proxymap[url]` returns the sequence of `Proxy` (or `None` for
@@ -200,13 +198,13 @@ Python 3.9–3.14. The codebase uses `from __future__ import annotations` so mod
 
 ```bash
 python -m venv .venv/<your-python-version>
-.venv/<your-python-version>/Scripts/pip install -e ".[dev,jspac,ifaddr]"
+.venv/<your-python-version>/Scripts/pip install -e ".[dev,dukpy,pac]"
 .venv/<your-python-version>/Scripts/pytest -q
 ```
 
-Tests that need `dukpy`/`quickjs`/`ifaddr` skip automatically if those extras aren't
-installed (`requests` comes from `dev`, since it's a real test dependency regardless of
-the `requests` integration's own optional-import guard).
+Tests that need `dukpy`/`quickjs` skip automatically if those extras aren't
+installed (`requests` and `httpx` come from `dev`: they are test dependencies, while
+proxylib itself imports them only when their integration is used).
 
 ### Releasing
 
@@ -251,8 +249,7 @@ published to GitHub Pages on every release (see above). To preview locally:
   `ProxyMapHandler` use the first proxy a `ProxyMap` returns; they don't retry the rest
   of a `PROXY a; PROXY b; DIRECT` chain on connection failure. Wrap your map with
   `ConfigurableProxyMap(proxymap, probe=True)` (active reachability probing, with a
-  circuit breaker for proxies that keep failing), or call
-  `first_working_proxy(proxymap[url])` directly, to pre-select a reachable entry.
+  circuit breaker for proxies that keep failing) to pre-select a reachable entry.
 
 ## License
 

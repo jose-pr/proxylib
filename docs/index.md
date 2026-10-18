@@ -4,7 +4,7 @@ Platform-agnostic proxy configuration for Python: detect the system/environment 
 settings, evaluate PAC (Proxy Auto-Config) files — including WPAD auto-discovery — and
 wire the result straight into `requests` or `urllib`.
 
-Zero required runtime dependencies; a couple of optional extras unlock more.
+One required runtime dependency (`netimps`); optional extras add a PAC JavaScript engine.
 
 For the full feature list, installation extras, quick-start examples for every
 integration, and known limitations, see the
