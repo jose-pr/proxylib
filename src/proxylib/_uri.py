@@ -50,10 +50,14 @@ class _URI(NamedTuple):
 
     @property
     def netloc(self) -> str:
+        host = self.host
+        if ":" in host and not host.startswith("["):
+            # An IPv6 literal is bracketed in a URL authority (RFC 3986 3.2.2).
+            host = f"[{host}]"
         if self.port:
-            return f"{self.host}:{self.port}"
+            return f"{host}:{self.port}"
         else:
-            return self.host
+            return host
 
     def resolved(self) -> "_URI":
         """Return a copy with the scheme's conventional port filled in if missing."""

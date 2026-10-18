@@ -391,3 +391,11 @@ def test_configurable_applies_default_no_proxy_without_explicit_rules():
     m = ConfigurableProxyMap(SimpleProxyMap("PROXY a:1"))
     assert m["http://internal.test/"] == [None]
     assert list(m["http://other.test/"])[0].host == "a"
+
+
+def test_ipv6_proxy_host_is_bracketed_in_urls():
+    proxy = Proxy("http", "u", "p", "::1", 8080)
+    assert proxy.url == "http://[::1]:8080"
+    assert proxy.as_uri() == "http://u:p@[::1]:8080"
+    assert Proxy("http", "", "", "fe80::1%eth0", None).url == "http://[fe80::1%eth0]"
+    assert Proxy("http", "", "", "proxy", 3128).url == "http://proxy:3128"
