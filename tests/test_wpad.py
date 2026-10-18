@@ -115,3 +115,16 @@ def test_discover_cache_expires(monkeypatch):
     clock[0] += 301
     discover("host.corp.example.com", cache_ttl=300)
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "fqdn, expected",
+    [
+        ("host.example.co.uk", ["example.co.uk"]),
+        ("host.example.com.au", ["example.com.au"]),
+        ("pc.dept.example.ne.jp", ["dept.example.ne.jp", "example.ne.jp"]),
+        ("host.example.de.", ["example.de"]),
+    ],
+)
+def test_candidate_domains_stop_above_public_suffixes(fqdn, expected):
+    assert list(_candidate_domains(fqdn)) == expected

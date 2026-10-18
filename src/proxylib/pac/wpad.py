@@ -11,7 +11,7 @@ import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FutureTimeoutError
-from typing import Dict, Iterator, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 from urllib.error import URLError
 
 from . import PAC, load
@@ -44,14 +44,35 @@ def _resolve_with_timeout(host: str, timeout: float) -> "Optional[str]":
         return None
 
 
+# Second-level labels that country-code registries sell names under
+# (example.co.uk, example.com.au, example.ne.jp). Anyone can register
+# wpad.<label>.<cc> there, so devolution must stop above them.
+_CC_SECOND_LEVEL = frozenset(
+    (
+        "ac", "ad", "asn", "biz", "co", "com", "ed", "edu", "firm", "gen", "go",
+        "gob", "gov", "govt", "gr", "id", "idv", "ind", "info", "lg", "ltd", "me",
+        "mil", "muni", "ne", "net", "nhs", "nom", "or", "org", "pe", "per", "plc",
+        "police", "re", "res", "sch", "school", "web",
+    )
+)  # fmt: skip
+
+
+def _is_public_suffix(labels: "List[str]") -> bool:
+    if len(labels) < 2:
+        return True
+    return len(labels) == 2 and len(labels[1]) == 2 and labels[0].lower() in _CC_SECOND_LEVEL
+
+
 def _candidate_domains(fqdn: str) -> Iterator[str]:
     """Parent domains of fqdn, most specific first, per the WPAD draft's search order.
 
-    The final (bare TLD) label is skipped so discovery doesn't try
-    ``wpad.com``/``wpad.co.uk``-style public suffixes.
+    Stops before a public suffix -- a bare TLD or a ccTLD registry level such
+    as ``co.uk`` -- since ``wpad.co.uk`` belongs to whoever registered it.
     """
-    labels = fqdn.split(".")
-    for i in range(1, len(labels) - 1):
+    labels = fqdn.rstrip(".").split(".")
+    for i in range(1, len(labels)):
+        if _is_public_suffix(labels[i:]):
+            return
         yield ".".join(labels[i:])
 
 
