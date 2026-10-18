@@ -75,7 +75,7 @@ def test_a_script_without_the_function_raises_pacerror(engine):
         PacScript("var FindProxyForURL = 1;", engine=engine)
 
 
-def test_an_endless_script_is_stopped_and_stays_failed(engine):
+def test_an_endless_script_is_stopped_and_fails_fast_during_the_cooldown(engine):
     script = PacScript("function FindProxyForURL(u, h) { while (true) {} }", engine=engine, timeout=0.5)
     start = time.monotonic()
     with pytest.raises(PACError, match="longer than"):
@@ -140,3 +140,38 @@ def test_no_engine_can_fall_back_to_direct(monkeypatch):
 def test_unpicklable_functions_are_refused(engine):
     with pytest.raises(TypeError, match="picklable"):
         PacScript("function FindProxyForURL(u, h) { return 'DIRECT'; }", engine=engine, functions={"f": lambda: 1})
+
+
+def test_a_stalled_script_is_restarted_after_the_cooldown(engine, monkeypatch, tmp_path):
+    import proxylib.pac.script as script_module
+
+    import os.path
+
+    # A flag file decides whether the script stalls, so the restarted helper
+    # can behave differently from the first one.
+    flag = tmp_path / "stall"
+    flag.write_text("")
+    js = (
+        "function FindProxyForURL(u, h) {"
+        "  if (stall(%r)) { while (true) {} }"
+        '  return "PROXY p:1"; }' % str(flag)
+    )
+    script = PacScript(js, engine=engine, timeout=0.5, functions={"stall": os.path.exists})
+    with pytest.raises(PACError, match="longer than"):
+        script.find_proxy_for_url("http://x/", "x")
+    flag.unlink()
+    monkeypatch.setattr(script_module.time, "monotonic", lambda: float("inf"))
+    assert script.find_proxy_for_url("http://x/", "x") == "PROXY p:1"
+
+
+def test_dns_builtins_are_bounded(monkeypatch):
+    from proxylib.pac import _functions
+
+    seen = []
+    monkeypatch.setattr(_functions._net, "resolve_ip", lambda host, **kw: seen.append(kw.get("timeout")))
+    monkeypatch.setattr(_functions._net, "resolve_all", lambda host, **kw: seen.append(kw.get("timeout")) or [])
+    _functions.myIpAddress()
+    _functions.isResolvable("x.test")
+    _functions.dnsResolveEx("x.test")
+    _functions.dnsResolve("x.test", cache_ttl=0)
+    assert seen == [_functions._DNS_TIMEOUT] * 4

@@ -96,6 +96,19 @@ def resolve_ip(host: str, *, ipv6: "Optional[bool]" = False, timeout: float = 5.
         return None
 
 
+def resolve_all(host: str, *, timeout: float = 5.0) -> "List[IPAddress]":
+    """Every IPv4 and IPv6 address ``host`` names, through the OS resolver,
+    bounded by ``timeout``; ``[]`` when it names none or the lookup fails."""
+    import netimps
+
+    if not host:
+        return []
+    try:
+        return list(netimps.resolve_system(host, ("a", "aaaa"), timeout=timeout))
+    except (OSError, ValueError):
+        return []
+
+
 def default_port(scheme: str) -> "Optional[int]":
     """The conventional port for a URL or proxy scheme, or ``None``."""
     import netimps

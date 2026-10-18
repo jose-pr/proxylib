@@ -166,8 +166,9 @@ proxymap = loads_pac(script_text)                       # or the script itself
 proxylib.lookup(proxymap, "https://example.com/")
 ```
 
-A script runs with a 1-second budget per call (`script_timeout=`); one that overruns
-raises `PACError` and stays failed. A script error is `PACError` too.
+A script runs with a 5-second budget per call (`script_timeout=`); a call that
+overruns raises `PACError`, and the script answers `PACError` at once for 30 seconds
+before it is restarted. A script error is `PACError` too.
 
 `ProxyMap(value)` picks the right map for a configured value without doing any
 I/O: a proxy URL or PAC result string builds a `SimpleProxyMap`, a PAC location (a

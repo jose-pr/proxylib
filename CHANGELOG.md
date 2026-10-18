@@ -22,8 +22,10 @@ Work toward 2.0, which breaks the 1.x API.
   `FindProxyForURL` function). `pac.loads(text)` / `proxylib.loads_pac` load a
   script from text; `pac.engines.names()` lists the installed engines.
 - PAC scripts run in a helper process with a time limit (`script_timeout=`,
-  default 1 s per call): a script that hangs raises `PACError` and stays failed
-  instead of hanging the program. Neither engine can be stopped in-process.
+  default 5 s per call): a call that hangs raises `PACError` instead of hanging
+  the program, and the script fails fast for 30 s before it is restarted.
+  Neither engine can be stopped in-process. The DNS builtins (`dnsResolve`,
+  `dnsResolveEx`, `isResolvable`, `myIpAddress`) are bounded at 2 s each.
 - `lookup(proxymap, url)` reads any proxy map's answer as a tuple of `Proxy` or
   `None` (DIRECT). It accepts every answer shape: `None`, a `Proxy`, a proxy URL,
   a PAC result string, any object with a `url` attribute, or an iterable of

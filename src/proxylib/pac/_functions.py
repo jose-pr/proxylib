@@ -34,6 +34,10 @@ _MONTHS = (
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 )
 
+# Seconds any one name lookup a builtin makes may take: a script's own time
+# budget (PacScript timeout) must not be spent waiting on DNS.
+_DNS_TIMEOUT = 2.0
+
 # host -> (monotonic timestamp, address or None) for dnsResolve. A script
 # asks for the same host many times across lookups, and netimps does not
 # keep failed answers, so failures are remembered here too.
@@ -61,7 +65,7 @@ def dnsResolve(host: str, /, cache_ttl: float = 30.0) -> "_Optional[str]":
         cached = _dns_cache.get(host)
         if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:
             return cached[1]
-    ip = _net.resolve_ip(host)
+    ip = _net.resolve_ip(host, timeout=_DNS_TIMEOUT)
     result = ip.exploded if ip else None
     if cache_ttl:
         _dns_cache[host] = (_time.monotonic(), result)
@@ -70,23 +74,16 @@ def dnsResolve(host: str, /, cache_ttl: float = 30.0) -> "_Optional[str]":
 
 def dnsResolveEx(host: str, /) -> str:
     """Resolve host to all of its addresses (IPv4 and IPv6), '; '-separated."""
-    try:
-        infos = _socket.getaddrinfo(host, None)
-    except OSError:
-        return ""
     seen: "list[str]" = []
-    for info in infos:
-        addr = info[4][0]
-        if addr not in seen:
-            seen.append(addr)
+    for address in _net.resolve_all(host, timeout=_DNS_TIMEOUT):
+        if str(address) not in seen:
+            seen.append(str(address))
     return "; ".join(seen)
 
 
 def myIpAddress() -> str:
-    try:
-        return _socket.gethostbyname(_socket.gethostname())
-    except OSError:
-        return "127.0.0.1"
+    ip = _net.resolve_ip(_socket.gethostname(), timeout=_DNS_TIMEOUT)
+    return str(ip) if ip is not None else "127.0.0.1"
 
 
 def myIpAddressEx() -> str:
@@ -224,11 +221,7 @@ def localHostOrDomainIs(host: str, hostdom: str) -> bool:
 
 
 def isResolvable(host: str) -> bool:
-    try:
-        _socket.gethostbyname(host)
-        return True
-    except OSError:
-        return False
+    return _net.resolve_ip(host, timeout=_DNS_TIMEOUT) is not None
 
 
 def isResolvableEx(host: str) -> bool:

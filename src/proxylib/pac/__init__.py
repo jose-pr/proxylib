@@ -26,7 +26,7 @@ def load(
     *,
     timeout: float = 10.0,
     cache_ttl: "Optional[float]" = 300.0,
-    script_timeout: float = 1.0,
+    script_timeout: float = 5.0,
     engine: "Optional[str]" = None,
     on_missing_engine: str = "raise",
 ) -> PacProxyMap:
@@ -53,7 +53,7 @@ def load(
 def loads(
     text: str,
     *,
-    script_timeout: float = 1.0,
+    script_timeout: float = 5.0,
     engine: "Optional[str]" = None,
     on_missing_engine: str = "raise",
 ) -> PacProxyMap:

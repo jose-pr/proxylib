@@ -33,6 +33,11 @@ _MEMORY_LIMIT = 64 * 1024 * 1024
 # top of the script's own budget.
 _CHILD_START_TIMEOUT = 30.0
 
+# Seconds an overrun script answers PACError at once before it is started
+# afresh: a hostile script costs one budget per cool-down, not one per call,
+# and a script that stalled once (slow DNS) recovers.
+_COOLDOWN = 30.0
+
 # url -> (monotonic timestamp, script text) for downloaded scripts.
 _download_cache: "Dict[str, Tuple[float, str]]" = {}
 
@@ -126,9 +131,11 @@ class PacScript:
     :mod:`proxylib.pac.engines`). ``functions`` adds to or overrides the PAC
     builtins the script can call; the script runs in a helper process, so
     they must be picklable module-level functions it can import.
-    ``timeout`` bounds each evaluation in seconds: a script that overruns it
-    fails for good (its helper process is ended), and every later call raises
-    :class:`PACError` at once.
+    ``timeout`` bounds each call in seconds (the builtins' own DNS lookups are
+    bounded at 2 s each): a call that overruns raises :class:`PACError`, its
+    helper process is ended, and for the next 30 seconds every call raises
+    :class:`PACError` at once; after that the script is started afresh. A
+    script that overruns while loading is not loaded.
 
     With no engine installed, ``on_missing_engine="raise"`` (the default)
     raises :class:`MissingExtraError`; ``"direct"`` warns and the script
@@ -146,7 +153,7 @@ class PacScript:
         *,
         engine: "Optional[str]" = None,
         functions: "Optional[Mapping[str, Callable[..., Any]]]" = None,
-        timeout: float = 1.0,
+        timeout: float = 5.0,
         on_missing_engine: str = "raise",
     ) -> None:
         if on_missing_engine not in ("raise", "direct"):
@@ -157,6 +164,9 @@ class PacScript:
         self.timeout = timeout
         self.engine_name: "Optional[str]" = None
         self._failed: "Optional[str]" = None
+        self._retry_at = 0.0
+        self._functions = dict(functions or {})
+        self._restart_lock = threading.Lock()
         self._runner: "Optional[_Runner]" = None
 
         engine_cls = engines.get_engine(engine)
@@ -171,7 +181,7 @@ class PacScript:
             return
         self.engine_name = engine_cls.name
         try:
-            self._runner = _Runner(engine_cls.name, source, dict(functions or {}), timeout)
+            self._runner = _Runner(engine_cls.name, source, self._functions, timeout)
         except _Overrun:
             raise PACError(f"the PAC script ran longer than {timeout} s while loading") from None
 
@@ -193,14 +203,29 @@ class PacScript:
         if self._runner is None:
             return "DIRECT"
         if self._failed:
-            raise PACError(f"the PAC script failed earlier: {self._failed}")
+            self._restart()
+        runner = self._runner
         try:
-            result = self._runner.call(url, host)
+            result = runner.call(url, host)
         except _Overrun:
             self._failed = f"it ran longer than {self.timeout} s"
-            self._runner.close()
+            self._retry_at = time.monotonic() + _COOLDOWN
+            runner.close()
             raise PACError(f"the PAC script ran longer than {self.timeout} s") from None
         return result if isinstance(result, str) else "DIRECT"
+
+    def _restart(self) -> None:
+        with self._restart_lock:
+            if not self._failed:
+                return  # another thread restarted it
+            if time.monotonic() < self._retry_at:
+                raise PACError(f"the PAC script failed earlier: {self._failed}")
+            try:
+                self._runner = _Runner(self.engine_name, self.source, self._functions, self.timeout)
+            except _Overrun:
+                self._retry_at = time.monotonic() + _COOLDOWN
+                raise PACError(f"the PAC script ran longer than {self.timeout} s") from None
+            self._failed = None
 
     @classmethod
     def from_file(

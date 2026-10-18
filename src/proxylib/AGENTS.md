@@ -152,21 +152,23 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 
 ## PAC support (`proxylib.pac`)
 
-- **`load(location, *, timeout=10.0, cache_ttl=300.0, script_timeout=1.0, engine=None,
+- **`load(location, *, timeout=10.0, cache_ttl=300.0, script_timeout=5.0, engine=None,
   on_missing_engine="raise") -> PacProxyMap`** (top-level `proxylib.load_pac`) — the
   PAC at a URL (`http`, `https`, `file`) or a path (`str`/`os.PathLike`; `file:path`
   without `//` is a path). Never script text. `timeout` bounds the download; the
   fetch **never goes through a proxy**; a body over 1 MiB raises `PACError`; UTF-8
   with a Latin-1 fallback; downloads (not `file:`) are cached per URL for
   `cache_ttl` seconds.
-- **`loads(text, *, script_timeout=1.0, engine=None, on_missing_engine="raise") ->
+- **`loads(text, *, script_timeout=5.0, engine=None, on_missing_engine="raise") ->
   PacProxyMap`** (top-level `proxylib.loads_pac`) — the PAC from script text.
-- **`PacScript(source, *, engine=None, functions=None, timeout=1.0,
+- **`PacScript(source, *, engine=None, functions=None, timeout=5.0,
   on_missing_engine="raise")`** — one script, run in a **helper Python process**
   (`sys.executable`) so it can be stopped: neither engine can be interrupted
   in-process. `.find_proxy_for_url(url, host) -> str` (a non-string result is
-  `"DIRECT"`). `timeout` bounds each call (and loading): an overrun ends the helper,
-  raises `PACError`, and every later call raises `PACError` at once. A script
+  `"DIRECT"`). `timeout` bounds each call and loading (each DNS lookup a builtin
+  makes is bounded at 2 s): an overrun ends the helper and raises `PACError`; for the
+  next 30 s every call raises `PACError` at once, then the script is started afresh.
+  A script that overruns while loading is not loaded. A script
   error, or a script with no `FindProxyForURL` function, raises `PACError`.
   `functions` adds to or overrides the builtins and must be picklable module-level
   functions the helper can import. No engine installed: `"raise"` →
