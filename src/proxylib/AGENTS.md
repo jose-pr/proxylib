@@ -78,32 +78,49 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
   - `no_proxy` — extra bypass rules (same syntax as `NO_PROXY`), checked before
     delegating to `proxymap`.
 
+## Bypass rules (`proxylib.bypass`, re-exported at top level)
+
+- **`BypassRules.parse(text, *, dialect="no_proxy", reversed=False) -> BypassRules`** —
+  `text` is the list as one string or as entries. Dialects: `"no_proxy"` (curl,
+  `,`/space separated), `"wininet"` (Windows `ProxyOverride`, `;` separated),
+  `"macos"` (`ExceptionsList`), `"gsettings"` (GNOME/MATE `ignore-hosts`), `"kde"`
+  (`NoProxyFor`; `reversed=True` for `ReversedException`, which makes the list name
+  the hosts that *use* the proxy). Unknown dialect → `ValueError`. Unparsable
+  entries are skipped with one `UserWarning` naming them.
+- Entry kinds: host (exact; in `no_proxy`/`kde`, and for a leading `.` or `*.` in
+  every dialect, the host and its subdomains); glob with `*`/`?` (`[` literal,
+  case-insensitive); CIDR including abbreviated IPv4 (`169.254/16`) and IPv6
+  (matched against IP-literal hosts only — no DNS); optional `:port` (a URL without
+  a port has its scheme's default); `<local>` = a host name with no dot;
+  `<subnet>` = resolves to loopback, link-local or an address on a local interface's
+  network (does DNS); `<-loopback>` turns off the implicit loopback bypass; `*` as
+  the whole list = every host (among other entries it is ignored in `no_proxy`,
+  with a warning, as curl and requests do; elsewhere it is a glob).
+- **Implicit loopback**: `localhost`, `*.localhost`, `127.0.0.0/8` and `::1` always
+  bypass unless `<-loopback>` is listed (Chromium, Go).
+- **`.matches(url) -> bool`**; `a | b` combines; `bool(rules)` is false when empty;
+  `BypassRules.NONE`; immutable, hashable.
+- Differences from `requests.utils.should_bypass_proxies` (tested): a default port
+  matches `host:443`; entries are case-insensitive; loopback bypasses implicitly;
+  IPv6 CIDR matches bracketed hosts; `*` alone bypasses everything (requests leaves
+  that to urllib).
+
 ## Env var config (`proxylib.env`, re-exported at top level)
 
-- **`EnvProxyConfig(http_proxy, https_proxy, no_proxy)`** — a `ProxyMap` from
-  `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`-style values. `http_proxy`/`https_proxy` are
-  `str | Proxy | None` (`None` = "not configured", raises `KeyError` for that scheme —
-  distinct from DIRECT). `no_proxy` is an iterable of entries: hostnames (exact or
-  `.`-suffix match, curl convention), CIDR (`10.0.0.0/8`; matches IP-literal request
-  hosts only, never resolved hostnames — an IPv6 CIDR entry parses but cannot match
-  yet, because a bracketed IPv6 request host is not parsed), `"<local>"`
-  (loopback/link-local/same-subnet, using real interface prefixes), or
-  `"*"` (bypass **everything**; as the whole value this matches curl/`requests`/stdlib,
-  but unlike them a `*` anywhere in the list also bypasses everything — checked ahead of every
-  other rule, so it never pays for a `<local>` DNS lookup, and it yields `(None,)`
-  (explicit DIRECT) even when no proxy is configured for the scheme). Merged
-  with (not overridden by) the process-wide default rules from `set_default_no_proxy()`.
-  - **`EnvProxyConfig.from_env() -> EnvProxyConfig`** — reads `HTTP_PROXY`/`http_proxy`,
-    `HTTPS_PROXY`/`https_proxy`, `NO_PROXY`/`no_proxy` (uppercase wins if both set).
-    Inside a CGI request (`REQUEST_METHOD` set) `HTTP_PROXY` is ignored (httpoxy); only an
-    exact lowercase `http_proxy` is read, and on Windows neither. An unparsable
-    `NO_PROXY` entry is skipped with a warning; abbreviated IPv4 CIDR (`169.254/16`) is
-    accepted.
-- **`set_default_no_proxy(rules)`** / **`get_default_no_proxy() -> list[str]`** —
-  process-wide default `NO_PROXY` rules consulted by every `EnvProxyConfig` and every
-  `ConfigurableProxyMap` (rules set when the map is built), in addition to whatever's
-  passed explicitly.
-  `set_default_no_proxy(None)` clears it.
+- **`EnvProxyConfig(*, proxies={}, no_proxy=None)`** — a proxy map. `proxies` maps a
+  URL scheme or `"all"` to a `Proxy`, a proxy URL (scheme-less = `http`) or a PAC
+  location (`file:` URL, or `http(s)` URL with a path), which is loaded on the
+  first lookup that needs it. `no_proxy` is `BypassRules` or `NO_PROXY` text.
+  Lookup: bypassed → `(None,)`; else the scheme's proxy (`ws` falls back to `http`,
+  `wss` to `https`); else `"all"`; else **`KeyError`** (no opinion — the environment
+  cannot say DIRECT). A key that is not a URL raises `ProxyParseError`.
+  `repr()` hides passwords.
+- **`EnvProxyConfig.from_environ(environ=None)`** — reads every `<scheme>_proxy`,
+  `all_proxy` and `no_proxy` from `environ` (default `os.environ`); a lowercase name
+  wins over its uppercase form. Inside a CGI request (`REQUEST_METHOD` set) an
+  uppercase `HTTP_PROXY` is ignored (httpoxy); with `os.environ` on Windows, whose
+  names are case-insensitive, `http_proxy` is ignored then too. There is no PAC
+  environment variable: put a PAC URL in `HTTP_PROXY` and the others.
 
 ## System / auto detection (`proxylib.os`, re-exported at top level)
 

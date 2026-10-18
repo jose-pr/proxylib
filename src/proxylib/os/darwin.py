@@ -11,6 +11,7 @@ import subprocess
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+from ..bypass import BypassRules
 from ..env import EnvProxyConfig
 from ..pac.wpad import discover as _wpad_discover
 from ..proxy import Proxy, ProxyMap, SimpleProxyMap
@@ -101,9 +102,12 @@ def system_proxy() -> "Union[ProxyMap, str]":
         else None
     )
     if http_proxy or https_proxy:
-        overrides = settings.get("ExceptionsList", [])
+        exceptions = list(settings.get("ExceptionsList", []))
+        if settings.get("ExcludeSimpleHostnames") == "1":
+            exceptions.append("<local>")
         return EnvProxyConfig(
-            http_proxy or https_proxy, https_proxy or http_proxy, overrides
+            proxies={"http": http_proxy or https_proxy, "https": https_proxy or http_proxy},
+            no_proxy=BypassRules.parse(exceptions, dialect="macos"),
         )
 
     return SimpleProxyMap()

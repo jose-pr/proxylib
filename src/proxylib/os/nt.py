@@ -17,6 +17,7 @@ from ctypes import wintypes
 from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
+from ..bypass import BypassRules
 from ..env import EnvProxyConfig
 from ..pac.wpad import discover as _wpad_discover
 from ..proxy import Proxy, ProxyMap, SimpleProxyMap
@@ -152,11 +153,9 @@ def _manual_proxy_map(settings: "_IEProxySettings") -> "Optional[ProxyMap]":
     https_proxy = per_protocol.get("https") or per_protocol.get("http")
     if not (http_proxy or https_proxy):
         return None
-    overrides = (settings.proxy_bypass or "").replace(";", " ").split()
     return EnvProxyConfig(
-        _as_url(http_proxy) if http_proxy else None,
-        _as_url(https_proxy) if https_proxy else None,
-        overrides,
+        proxies={"http": _as_url(http_proxy), "https": _as_url(https_proxy)},
+        no_proxy=BypassRules.parse(settings.proxy_bypass or "", dialect="wininet"),
     )
 
 

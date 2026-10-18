@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
+from ...bypass import BypassRules
 from ...env import EnvProxyConfig
 from ...pac.wpad import discover as _wpad_discover
 from ...proxy import ProxyMap
@@ -71,4 +72,8 @@ def detect() -> "Optional[Union[ProxyMap, str]]":
     if not (http_proxy or https_proxy):
         return None
     overrides = [h.strip() for h in section.get("noproxyfor", "").split(",") if h.strip()]
-    return EnvProxyConfig(http_proxy or https_proxy, https_proxy, overrides)
+    reversed_list = section.get("reversedexception", "false").strip().lower() == "true"
+    return EnvProxyConfig(
+        proxies={"http": http_proxy or https_proxy, "https": https_proxy},
+        no_proxy=BypassRules.parse(overrides, dialect="kde", reversed=reversed_list),
+    )

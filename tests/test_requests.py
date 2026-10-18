@@ -137,7 +137,7 @@ def test_proxy_map_adapter_wins_over_env_proxy_when_trust_env(monkeypatch, captu
 def test_proxydict_treats_non_url_keys_as_missing():
     from proxylib import EnvProxyConfig
 
-    pd = ProxyDict(EnvProxyConfig("http://p:1", None, []))
+    pd = ProxyDict(EnvProxyConfig(proxies={"http": "http://p:1"}))
     assert pd.get("http") is None
     assert "all" not in pd
     assert pd["http://example.com/"] == "http://p:1"
@@ -149,6 +149,6 @@ def test_requests_get_with_proxydict_over_env_config_reaches_local_server(http_s
 
     http_server.route("/", b"ok")
     response = requests.get(
-        http_server.url("/"), proxies=ProxyDict(EnvProxyConfig(None, None, [])), timeout=5
+        http_server.url("/"), proxies=ProxyDict(EnvProxyConfig()), timeout=5
     )
     assert response.text == "ok"

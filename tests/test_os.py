@@ -52,7 +52,7 @@ def test_auto_proxy_loads_pac_url_string(monkeypatch):
 def test_auto_proxy_passes_through_env_config(monkeypatch):
     import proxylib.os as proxylib_os
 
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", [])
+    cfg = EnvProxyConfig(proxies={"http": "http://proxy:80", "https": "http://proxy:80"})
     monkeypatch.setattr(proxylib_os, "system_proxy", lambda provider="python": cfg)
 
     result = proxylib_os.auto_proxy()
@@ -497,3 +497,36 @@ def test_system_proxy_rejects_an_unknown_provider():
 
     with pytest.raises(ValueError, match="sytem"):
         proxylib_os.system_proxy("sytem")
+
+
+def test_darwin_exceptions_use_macos_syntax(monkeypatch):
+    import proxylib.os.darwin as darwin
+
+    monkeypatch.setattr(
+        darwin,
+        "_read_scutil_proxy",
+        lambda: {
+            "HTTPEnable": "1",
+            "HTTPProxy": "proxy",
+            "HTTPPort": "8080",
+            "ExceptionsList": ["*.local", "169.254/16"],
+            "ExcludeSimpleHostnames": "1",
+        },
+    )
+    result = darwin.system_proxy()
+    assert result["http://printer.local/"] == (None,)
+    assert result["http://169.254.1.1/"] == (None,)
+    assert result["http://intranet/"] == (None,)
+    assert result["http://example.com/"][0].host == "proxy"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows WinHTTP backend")
+def test_windows_proxy_override_uses_wininet_syntax():
+    import proxylib.os.nt as nt
+
+    settings = nt._IEProxySettings(False, None, "proxy:8080", "*.corp.example.com;10.*;<local>")
+    result = nt._manual_proxy_map(settings)
+    assert result["http://a.corp.example.com/"] == (None,)
+    assert result["http://10.9.9.9/"] == (None,)
+    assert result["http://intranet/"] == (None,)
+    assert result["http://example.com/"][0].host == "proxy"

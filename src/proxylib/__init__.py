@@ -4,9 +4,8 @@ evaluation (with WPAD discovery), and Transport Adapters for ``requests``/``urll
 from typing import Any
 
 from ._net import clear_caches as clear_caches
+from .bypass import BypassRules as BypassRules
 from .env import EnvProxyConfig as EnvProxyConfig
-from .env import get_default_no_proxy as get_default_no_proxy
-from .env import set_default_no_proxy as set_default_no_proxy
 from .exceptions import MissingExtraError as MissingExtraError
 from .exceptions import NoReachableProxyError as NoReachableProxyError
 from .exceptions import PACError as PACError
@@ -35,6 +34,7 @@ from .proxy import from_source as from_source
 from .proxy import lookup as lookup
 
 __all__ = (
+    "BypassRules",
     "ChainProxyMap",
     "ConfigurableProxyMap",
     "EnvProxyConfig",
@@ -58,12 +58,10 @@ __all__ = (
     "clear_caches",
     "discover_pac",
     "from_source",
-    "get_default_no_proxy",
     "load_pac",
     "lookup",
     "patch",
     "register_patcher",
-    "set_default_no_proxy",
     "system_proxy",
     "unpatch",
 )

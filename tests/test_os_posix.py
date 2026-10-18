@@ -208,18 +208,15 @@ def _captured_proxy_urls(monkeypatch, gsettings, values):
     strings it hands to EnvProxyConfig.
 
     Asserting on the strings rather than the resulting Proxy objects is
-    deliberate: Proxy normalizes a missing port to 0, and ``:None`` fails the
-    port regex and is dropped, so a malformed ``http://host:None`` parses to
-    exactly the same Proxy as a correct ``http://host``. The defect is only
-    observable in the intermediate string.
+    deliberate: a malformed ``http://host:None`` is a parse error only when the
+    proxy is used, so the defect is clearest in the intermediate string.
     """
     captured = {}
     real = gsettings.EnvProxyConfig
 
-    def capture(http_proxy, https_proxy, no_proxy):
-        captured["http"] = http_proxy
-        captured["https"] = https_proxy
-        return real(http_proxy, https_proxy, no_proxy)
+    def capture(*, proxies, no_proxy):
+        captured.update(proxies)
+        return real(proxies=proxies, no_proxy=no_proxy)
 
     monkeypatch.setattr(gsettings, "_gsettings_get", _fake_gsettings(values))
     monkeypatch.setattr(gsettings, "EnvProxyConfig", capture)
@@ -843,3 +840,36 @@ def test_gsettings_cache_expires(monkeypatch):
     gs._gsettings_list_recursively("org.gnome.system.proxy")
     assert len(calls) == 2
     gs.clear_gsettings_cache()
+
+
+def test_kde_reversed_exception_lists_the_proxied_hosts(tmp_path, monkeypatch):
+    import proxylib.os.posix.kde as kde
+
+    path = _write_kioslaverc(
+        tmp_path,
+        "[Proxy Settings]\n"
+        "ProxyType=1\n"
+        "httpProxy=http://proxy.example.com 8080\n"
+        "NoProxyFor=*.internal\n"
+        "ReversedException=true\n",
+    )
+    monkeypatch.setattr(kde, "_kioslaverc_path", lambda: path)
+    result = kde.detect()
+    assert result["http://app.internal/"][0].host == "proxy.example.com"
+    assert result["http://example.com/"] == (None,)
+
+
+def test_gnome_ignore_hosts_use_glib_syntax(monkeypatch):
+    import proxylib.os.posix._gsettings as gsettings
+
+    values = {
+        ("org.gnome.system.proxy", "mode"): "manual",
+        ("org.gnome.system.proxy.http", "host"): "gnome-proxy",
+        ("org.gnome.system.proxy.http", "port"): "3128",
+        ("org.gnome.system.proxy", "ignore-hosts"): "['*.local', '192.168.0.0/16']",
+    }
+    monkeypatch.setattr(gsettings, "_gsettings_get", _fake_gsettings(values))
+    result = gsettings.read_desktop_proxy("org.gnome.system.proxy")
+    assert result["http://printer.local/"] == (None,)
+    assert result["http://192.168.1.9/"] == (None,)
+    assert result["http://example.com/"][0].host == "gnome-proxy"

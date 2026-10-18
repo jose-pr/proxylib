@@ -26,6 +26,11 @@ Work toward 2.0, which breaks the 1.x API.
   a PAC location is loaded on its first lookup.
 - `Proxy.parse(text)` and `Proxy.parse_pac_result(text)`, and the `ProxyLike` /
   `ProxyAnswer` type aliases.
+- `BypassRules`: one bypass-list type with parsers for `NO_PROXY` (curl), Windows
+  `ProxyOverride`, macOS `ExceptionsList`, GNOME `ignore-hosts` and KDE `NoProxyFor`
+  (including `ReversedException`); IPv6 CIDR works. The OS backends now read their
+  own bypass lists with their own syntax (a WinINet `*.corp;10.*` list, a macOS
+  `*.local`, a KDE reversed list).
 
 ### Changed
 
@@ -40,6 +45,17 @@ Work toward 2.0, which breaks the 1.x API.
 - Built-in maps return tuples. A malformed proxy or request URL raises
   `ProxyParseError` (a `ValueError`). Bracketed IPv6 hosts parse
   (`http://[::1]:8080`), and a scheme-less `host:port` is an `http` proxy.
+- `EnvProxyConfig(*, proxies={}, no_proxy=None)` replaces the three positional
+  arguments; `EnvProxyConfig.from_environ(environ=None)` replaces `from_env()`
+  and reads any mapping. Every `<scheme>_proxy` is read, plus `all_proxy`; `ws`/`wss`
+  use the `http`/`https` proxies; a lowercase name now wins over uppercase (stdlib
+  and curl order); a PAC URL may be given as a proxy value.
+- `<local>` in a bypass list now means a host name without a dot (its WinINet
+  meaning); the 1.x meaning (loopback, link-local or same subnet) is `<subnet>`.
+  `ConfigurableProxyMap(bypass_local=True)` uses `<subnet>`.
+- Loopback (`localhost`, `127.0.0.0/8`, `::1`) bypasses the proxy wherever bypass
+  rules apply, unless `<-loopback>` is listed. In `NO_PROXY`, `*` among other
+  entries is ignored with a warning, as curl and requests do.
 - proxylib now depends on `netimps>=0.4.0,<0.5` for host:port handling, local
   interfaces (real prefix lengths on every OS, no extra needed), bounded name
   lookups and TCP probes. `import proxylib` imports neither it nor `requests`.
@@ -54,6 +70,8 @@ Work toward 2.0, which breaks the 1.x API.
 
 ### Removed
 
+- `set_default_no_proxy()` / `get_default_no_proxy()`: pass bypass rules where a
+  map is built (`EnvProxyConfig(no_proxy=...)`, `ConfigurableProxyMap(no_proxy=...)`).
 - `UriSplit`, `Proxy.from_str`, `Proxy.find_all` and `Proxy.as_uri`: use
   `Proxy.parse`, `Proxy.parse_pac_result` and `Proxy.uri`.
 - `proxylib.netutils` and the top-level `first_working_proxy`; use

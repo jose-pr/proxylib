@@ -10,6 +10,7 @@ import time
 from typing import Dict, Optional, Tuple, Union
 
 from ... import _net
+from ...bypass import BypassRules
 from ...env import EnvProxyConfig
 from ...pac.wpad import discover as _wpad_discover
 from ...proxy import ProxyMap
@@ -137,4 +138,7 @@ def read_desktop_proxy(schema: str) -> "Optional[Union[ProxyMap, str]]":
         return None
     ignore_hosts = _gsettings_get(schema, "ignore-hosts") or "[]"
     overrides = [h.strip(" '\"") for h in ignore_hosts.strip("[]").split(",") if h.strip(" '\"")]
-    return EnvProxyConfig(http_proxy or https_proxy, https_proxy, overrides)
+    return EnvProxyConfig(
+        proxies={"http": http_proxy or https_proxy, "https": https_proxy},
+        no_proxy=BypassRules.parse(overrides, dialect="gsettings"),
+    )

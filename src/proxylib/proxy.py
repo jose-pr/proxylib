@@ -23,6 +23,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from . import _net
 from ._net import first_working_proxy
+from .bypass import BypassRules
 from .exceptions import ProxyParseError
 
 __all__ = [
@@ -398,13 +399,13 @@ class ConfigurableProxyMap(ProxyMap):
     """Decorates any ``ProxyMap`` with caching, active probing, round-robin
     selection, browser-style privacy stripping, and an implicit local bypass.
 
-    All features are opt-in and independent; the decorated map's own result
-    contract (``KeyError``/``[None]``/``[Proxy]``) is preserved throughout.
+    All features are opt-in and independent; the decorated map is read with
+    :func:`lookup`, so its "no opinion" (``KeyError``) passes through.
 
     The cache holds the decorated map's answer for at most ``cache_maxsize``
     URLs (least recently used dropped first); round-robin rotation applies to
-    every lookup, cached or not. The process-wide ``set_default_no_proxy()``
-    rules apply whenever they are set when the map is built.
+    every lookup, cached or not. ``no_proxy`` is :class:`BypassRules` or
+    ``NO_PROXY`` text; ``bypass_local=True`` adds ``<subnet>``.
     """
 
     def __init__(
@@ -417,7 +418,7 @@ class ConfigurableProxyMap(ProxyMap):
         round_robin: bool = False,
         browser_compatibility: bool = False,
         bypass_local: bool = False,
-        no_proxy: "Optional[Iterable[str]]" = None,
+        no_proxy: "Union[BypassRules, str, Iterable[str], None]" = None,
         cache_maxsize: int = 1024,
     ) -> None:
         self.proxymap = proxymap
@@ -428,24 +429,12 @@ class ConfigurableProxyMap(ProxyMap):
         self.round_robin = round_robin
         self.browser_compatibility = browser_compatibility
 
-        # Local import: env.py imports proxy.py, so importing it back at
-        # module level here would be circular (same reason ProxyMap.__new__
-        # locally imports `pac`). Reused rather than reimplemented: an
-        # EnvProxyConfig(None, None, rules) has no configured http/https
-        # proxy, so it raises KeyError for anything NOT matched by `rules`
-        # and returns [None] for anything that is -- exactly the "bypass
-        # check" primitive this class needs, complete with CIDR/<local>
-        # matching and the global no_proxy defaults, for free.
-        bypass_rules = list(no_proxy or ())
+        rules = no_proxy if isinstance(no_proxy, BypassRules) else BypassRules.parse(no_proxy)
         if bypass_local:
-            # <local> covers loopback, link-local and same-subnet addresses,
-            # a superset of what bypass_local asks for.
-            bypass_rules.append("<local>")
-        from .env import EnvProxyConfig, get_default_no_proxy
-
-        self._bypass_checker: "Optional[ProxyMap]" = None
-        if bypass_rules or get_default_no_proxy():
-            self._bypass_checker = EnvProxyConfig(None, None, bypass_rules)
+            rules = rules | BypassRules.parse("<subnet>")
+        # Without any rule there is no bypass step at all, not even the
+        # implicit loopback one: the decorated map decides.
+        self._bypass: "Optional[BypassRules]" = rules if rules else None
 
         # url -> (monotonic timestamp, decoded answer, probed answer or None);
         # the probed answer is only kept when round-robin is off, since a
@@ -493,11 +482,8 @@ class ConfigurableProxyMap(ProxyMap):
         return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
-        if self._bypass_checker is not None:
-            try:
-                return lookup(self._bypass_checker, url)
-            except KeyError:
-                pass  # not bypassed -- fall through to normal resolution
+        if self._bypass is not None and self._bypass.matches(url):
+            return (None,)
 
         effective_url = self._effective_url(url)
 

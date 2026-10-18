@@ -10,15 +10,6 @@ from proxylib import (
     SimpleProxyMap,
     from_source,
 )
-from proxylib.env import set_default_no_proxy
-
-
-@pytest.fixture(autouse=True)
-def clear_default_no_proxy():
-    set_default_no_proxy(None)
-    yield
-    set_default_no_proxy(None)
-
 
 def test_pac_result_direct():
     assert Proxy.parse_pac_result("direct") == (None,)
@@ -335,15 +326,18 @@ def test_configurable_proxy_map_no_proxy_rules():
     assert cpm["http://other.com"] == (p,)
 
 
-def test_configurable_proxy_map_no_proxy_merges_with_global_defaults():
-    set_default_no_proxy(["fromdefault.com"])
-    p = Proxy.parse("http://p:80")
-    inner = _CountingProxyMap((p,))
-    cpm = ConfigurableProxyMap(inner, no_proxy=["explicit.com"])
+def test_configurable_proxy_map_takes_bypass_rules():
+    from proxylib import BypassRules
 
-    assert cpm["http://explicit.com"] == (None,)
-    assert cpm["http://fromdefault.com"] == (None,)
+    p = Proxy.parse("http://p:80")
+    cpm = ConfigurableProxyMap(_CountingProxyMap((p,)), no_proxy=BypassRules.parse("*.corp", dialect="wininet"))
+    assert cpm["http://a.corp"] == (None,)
     assert cpm["http://other.com"] == (p,)
+
+
+def test_configurable_proxy_map_without_rules_has_no_bypass_step():
+    p = Proxy.parse("http://p:80")
+    assert ConfigurableProxyMap(_CountingProxyMap((p,)))["http://localhost/"] == (p,)
 
 
 def test_package_exposes_version():
@@ -382,13 +376,6 @@ def test_configurable_cache_is_bounded_and_drops_least_recent():
     m["http://a/"]
     m["http://b/"]
     assert calls == ["http://a/", "http://b/", "http://c/", "http://b/"]
-
-
-def test_configurable_applies_default_no_proxy_without_explicit_rules():
-    set_default_no_proxy(["internal.test"])
-    m = ConfigurableProxyMap(SimpleProxyMap("PROXY a:1"))
-    assert m["http://internal.test/"] == (None,)
-    assert list(m["http://other.test/"])[0].host == "a"
 
 
 def test_ipv6_proxy_host_is_bracketed_in_urls():
