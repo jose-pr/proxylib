@@ -39,11 +39,14 @@ class ProxyDict:
     def __getitem__(self, uri: str) -> str:
         try:
             proxy = next(iter(self.proxymap[uri]))
-            if proxy is None:
-                raise KeyError(uri)
-            return proxy.as_uri()
-        except StopIteration:
+        except (StopIteration, ValueError):
+            # requests also asks for bare keys such as "http" or "all"; a map
+            # that only understands full URLs raises ValueError for those,
+            # and in a proxies dict that means "no entry", not an error.
+            raise KeyError(uri) from None
+        if proxy is None:
             raise KeyError(uri)
+        return proxy.as_uri()
 
     def get(self, uri: str, default=None):
         try:

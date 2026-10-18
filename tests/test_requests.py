@@ -132,3 +132,39 @@ def test_proxy_map_adapter_wins_over_env_proxy_when_trust_env(monkeypatch, captu
     session.get("http://example.com")
 
     assert captured_send["proxies"]["http://example.com"] == "http://from-proxymap:8080"
+
+
+def test_proxydict_treats_non_url_keys_as_missing():
+    from proxylib import EnvProxyConfig
+
+    pd = ProxyDict(EnvProxyConfig("http://p:1", None, []))
+    assert pd.get("http") is None
+    assert "all" not in pd
+    assert pd["http://example.com/"] == "http://p:1"
+
+
+def test_requests_get_with_proxydict_over_env_config_reaches_local_server():
+    # requests probes bare keys ("http", "all") before the URL ones.
+    import http.server
+    import threading
+
+    from proxylib import EnvProxyConfig
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/"
+        response = requests.get(url, proxies=ProxyDict(EnvProxyConfig(None, None, [])), timeout=5)
+        assert response.text == "ok"
+    finally:
+        server.shutdown()
+        server.server_close()
