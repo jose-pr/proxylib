@@ -1,3 +1,5 @@
+import importlib.util
+
 import pytest
 
 import proxylib.pac.engines as engines
@@ -31,10 +33,11 @@ def test_get_engine_class_prefers_quickjs_over_dukpy_when_both_available(monkeyp
 
 
 def test_get_engine_class_honors_env_priority(monkeypatch):
-    monkeypatch.setenv("PROXYLIB_JS_ENGINE", "quickjs")
-    cls = engines.get_engine_class()
-    assert cls is not None
-    assert cls.__name__ == "QuickJSEngine"
+    quickjs_stub = type("QuickJSStub", (), {})
+    dukpy_stub = type("DukpyStub", (), {})
+    monkeypatch.setattr(engines, "_ENGINES", {"quickjs": quickjs_stub, "dukpy": dukpy_stub})
+    monkeypatch.setenv("PROXYLIB_JS_ENGINE", "dukpy")
+    assert engines.get_engine_class() is dukpy_stub
 
 
 def test_get_engine_class_skips_unavailable_entries(monkeypatch):
@@ -48,9 +51,12 @@ def test_get_engine_class_returns_none_when_nothing_available(monkeypatch):
     assert engines.get_engine_class() is None
 
 
-pytest.importorskip("quickjs")
+requires_quickjs = pytest.mark.skipif(
+    importlib.util.find_spec("quickjs") is None, reason="quickjs not installed"
+)
 
 
+@requires_quickjs
 def test_quickjs_engine_export_eval_and_call():
     from proxylib.pac.engines.quickjs import QuickJSEngine
 
@@ -60,6 +66,7 @@ def test_quickjs_engine_export_eval_and_call():
     assert engine.call("add", 2, 3) == 5
 
 
+@requires_quickjs
 def test_quickjs_engine_call_honors_js_override():
     from proxylib.pac.engines.quickjs import QuickJSEngine
 

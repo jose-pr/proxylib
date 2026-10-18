@@ -148,7 +148,7 @@ def test_load_caches_network_downloads(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def read(self):
+        def read(self, amt=None):
             return b"function FindProxyForURL(url, host) { return 'DIRECT'; }"
 
     def fake_urlopen(url, **kwargs):
@@ -176,7 +176,7 @@ def test_load_cache_ttl_zero_bypasses_cache(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def read(self):
+        def read(self, amt=None):
             return b"function FindProxyForURL(url, host) { return 'DIRECT'; }"
 
     def fake_urlopen(url, **kwargs):
@@ -231,7 +231,7 @@ def test_load_urlopen_bypasses_env_proxy(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def read(self):
+        def read(self, amt=None):
             return b""
 
     def fake_do_open(self, http_class, req, **kwargs):
@@ -308,3 +308,46 @@ def test_example_pac_file():
         Proxy.from_str("http://wcg1.example.com:8080")
     ]
     assert proxies["nfs://127.1.1.1/testing"] == [None]
+
+
+def _fake_urlopen(monkeypatch, body, seen):
+    import proxylib.pac as pac
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, amt=None):
+            return body if amt is None else body[:amt]
+
+    def fake_urlopen(url, **kwargs):
+        seen.append(kwargs)
+        return FakeResponse()
+
+    pac.clear_download_cache()
+    monkeypatch.setattr(pac, "_urlopen", fake_urlopen)
+    return pac
+
+
+def test_load_applies_a_default_timeout(monkeypatch):
+    seen = []
+    pac = _fake_urlopen(monkeypatch, b"function FindProxyForURL(u, h) { return 'DIRECT'; }", seen)
+    pac.load("http://internal/a.pac", cache_ttl=0)
+    pac.load("http://internal/a.pac", cache_ttl=0, timeout=2)
+    assert seen == [{"timeout": 10.0}, {"timeout": 2}]
+
+
+def test_load_refuses_an_oversized_script(monkeypatch):
+    body = b"function FindProxyForURL(u, h) { return 'DIRECT'; }" + b" " * (1024 * 1024)
+    pac = _fake_urlopen(monkeypatch, body, [])
+    with pytest.raises(ValueError, match="larger than"):
+        pac.load("http://internal/big.pac", cache_ttl=0)
+
+
+def test_load_decodes_a_non_utf8_script_as_latin1(monkeypatch):
+    body = "function FindProxyForURL(u, h) { /* caf\xe9 */ return 'DIRECT'; }".encode("latin-1")
+    pac = _fake_urlopen(monkeypatch, body, [])
+    assert pac.load("http://internal/latin1.pac", cache_ttl=0) is not None

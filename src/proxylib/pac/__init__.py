@@ -366,6 +366,11 @@ except ImportError:
 # _cache and netutils' interfaces cache.
 _download_cache: "_Dict[str, _Tuple[float, PAC]]" = {}
 
+# Seconds, applied when the caller passes no timeout= of its own.
+_DEFAULT_TIMEOUT = 10.0
+# Chromium's PAC fetcher limit; a larger body is refused rather than run.
+_MAX_PAC_BYTES = 1024 * 1024
+
 
 def clear_download_cache() -> None:
     _download_cache.clear()
@@ -380,7 +385,9 @@ def load(url: str, cache_ttl: "float|None" = 300.0, **urllib_kwds) -> PAC:
 
     Genuine network downloads (not ``file:`` paths or inline JS) are cached
     per URL for ``cache_ttl`` seconds (default 5 minutes); pass
-    ``cache_ttl=0``/``None`` to force a fresh fetch.
+    ``cache_ttl=0``/``None`` to force a fresh fetch. A download times out
+    after 10 seconds unless ``timeout=`` is passed, and a body over 1 MiB
+    raises ``ValueError``.
     """
     js = None
     from_network = False
@@ -398,8 +405,16 @@ def load(url: str, cache_ttl: "float|None" = 300.0, **urllib_kwds) -> PAC:
             cached = _download_cache.get(url)
             if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:
                 return cached[1]
+        urllib_kwds.setdefault("timeout", _DEFAULT_TIMEOUT)
         with _urlopen(url, **urllib_kwds) as resp:
-            js = _cast(bytes, resp.read()).decode()
+            body = _cast(bytes, resp.read(_MAX_PAC_BYTES + 1))
+        if len(body) > _MAX_PAC_BYTES:
+            raise ValueError(f"PAC script from {url} is larger than {_MAX_PAC_BYTES} bytes")
+        try:
+            js = body.decode("utf-8")
+        except UnicodeDecodeError:
+            # Latin-1 maps every byte, so a legacy-encoded script still loads.
+            js = body.decode("latin-1")
 
     if "FindProxyForURL" not in js:
         raise ValueError(f"No FindProxyForURL found in response from: {url}")

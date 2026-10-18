@@ -6,6 +6,7 @@ static/class method (and any subclass adds) into the JS global scope so
 
 from __future__ import annotations
 
+import threading
 from abc import ABCMeta
 from typing import Callable, Dict, List, Optional, OrderedDict, Sequence
 
@@ -94,6 +95,11 @@ class JSContext(metaclass=JSContextMeta):
                 "extras: proxylib[jspac] (dukpy) or proxylib[quickjs]."
             )
         engine = engine_cls()
+        # Neither dukpy nor quickjs tolerates two threads in one context (an
+        # interpreter abort, not an exception), and a ProxyMap is shared
+        # process-wide, so every entry into the engine goes through this lock.
+        # Reentrant: a JS call can call back into an exported Python function.
+        lock = threading.RLock()
         for key, val in context.items():
             if isinstance(val, staticmethod):
                 val = val.__func__
@@ -105,7 +111,8 @@ class JSContext(metaclass=JSContextMeta):
                 val = val.__get__(self)
 
             engine.export_function(key, val)
-        engine.eval(js)
+        with lock:
+            engine.eval(js)
 
         # Pre-bind one callable per exported name now, instead of allocating
         # a fresh closure on every attribute access. Each one still calls
@@ -123,7 +130,8 @@ class JSContext(metaclass=JSContextMeta):
 
             def _make_js_function(key=key):
                 def jsFunction(*args):
-                    return engine.call(key, *args)
+                    with lock:
+                        return engine.call(key, *args)
 
                 return jsFunction
 

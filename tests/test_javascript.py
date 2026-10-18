@@ -1,3 +1,5 @@
+import importlib.util
+
 import pytest
 
 pytest.importorskip("dukpy")
@@ -66,15 +68,19 @@ def test_jscontext_overrides_can_add_a_new_exported_name():
 # JSContext is written against the pluggable JSEngine interface, not dukpy
 # specifically -- these confirm that's actually true rather than assumed.
 
-pytest.importorskip("quickjs")
+requires_quickjs = pytest.mark.skipif(
+    importlib.util.find_spec("quickjs") is None, reason="quickjs not installed"
+)
 
 
+@requires_quickjs
 def test_jscontext_falls_back_to_python_on_quickjs(monkeypatch):
     monkeypatch.setenv("PROXYLIB_JS_ENGINE", "quickjs")
     instance = Calculator("var unused = 1;")
     assert instance.compute(41) == 42
 
 
+@requires_quickjs
 def test_jscontext_js_can_override_exported_function_on_quickjs(monkeypatch):
     monkeypatch.setenv("PROXYLIB_JS_ENGINE", "quickjs")
     instance = Calculator("function compute(n) { return n * 2; }")
@@ -126,3 +132,40 @@ def test_jsproxyautoconfig_dns_domain_levels_and_convert_addr_and_local_host():
     """
     pac = JSProxyAutoConfig(js)
     assert pac["http://sub.example.com/"] == [None]
+
+
+def _hammer(pac, threads=8, lookups=200):
+    import threading
+
+    errors = []
+
+    def worker(n):
+        try:
+            for i in range(lookups):
+                assert list(pac[f"http://h{n}x{i}.e.com/"])[0].host == "a"
+        except Exception as exc:  # pragma: no cover - only on failure
+            errors.append(exc)
+
+    workers = [threading.Thread(target=worker, args=(n,)) for n in range(threads)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    return errors
+
+
+_THREADED_PAC = (
+    'function FindProxyForURL(u, h) { if (isPlainHostName(h)) return "DIRECT";'
+    ' if (dnsDomainIs(h, ".e.com")) return "PROXY a:1"; return "DIRECT"; }'
+)
+
+
+def test_jsproxyautoconfig_is_safe_to_share_between_threads_on_dukpy(monkeypatch):
+    monkeypatch.setenv("PROXYLIB_JS_ENGINE", "dukpy")
+    assert _hammer(JSProxyAutoConfig(_THREADED_PAC)) == []
+
+
+@requires_quickjs
+def test_jsproxyautoconfig_is_safe_to_share_between_threads_on_quickjs(monkeypatch):
+    monkeypatch.setenv("PROXYLIB_JS_ENGINE", "quickjs")
+    assert _hammer(JSProxyAutoConfig(_THREADED_PAC)) == []
