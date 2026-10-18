@@ -30,7 +30,8 @@ Zero required runtime dependencies; a couple of optional extras unlock more (see
   you can use directly on any platform.
 - **Env var proxy config** — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (and lowercase
   variants), with correct exact/subdomain `NO_PROXY` matching, plus CIDR entries,
-  `<local>`, and `*` (bypass everything) as curl and `requests` read them.
+  `<local>`, and `*` (bypass everything; curl and `requests` honour it only as the
+  whole value, proxylib anywhere in the list).
 - **PAC support** — the full Netscape PAC utility-function set (including
   `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions, runnable either
   as real JavaScript through a pluggable engine (`dukpy` or `quickjs`, picked via
@@ -192,7 +193,7 @@ DIRECT) to try, in order.
 
 ## Supported Python versions
 
-Python 3.9–3.13. The codebase uses `from __future__ import annotations` so modern
+Python 3.9–3.14. The codebase uses `from __future__ import annotations` so modern
 `X | Y` type syntax can be used everywhere while staying importable on 3.9.
 
 ## Development

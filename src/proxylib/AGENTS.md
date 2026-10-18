@@ -64,10 +64,12 @@ can't express "explicitly DIRECT", only set/absent).
   `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`-style values. `http_proxy`/`https_proxy` are
   `str | Proxy | None` (`None` = "not configured", raises `KeyError` for that scheme —
   distinct from DIRECT). `no_proxy` is an iterable of entries: hostnames (exact or
-  `.`-suffix match, curl convention), CIDR (`10.0.0.0/8`, IPv6 supported; matches
-  IP-literal request hosts only, never resolved hostnames), `"<local>"`
+  `.`-suffix match, curl convention), CIDR (`10.0.0.0/8`; matches IP-literal request
+  hosts only, never resolved hostnames — an IPv6 CIDR entry parses but cannot match
+  yet, because a bracketed IPv6 request host is not parsed), `"<local>"`
   (loopback/link-local/same-subnet, needs the `ifaddr` extra for full accuracy), or
-  `"*"` (bypass **everything**, matching curl/`requests`/stdlib — checked ahead of every
+  `"*"` (bypass **everything**; as the whole value this matches curl/`requests`/stdlib,
+  but unlike them a `*` anywhere in the list also bypasses everything — checked ahead of every
   other rule, so it never pays for a `<local>` DNS lookup, and it yields `[None]`
   (explicit DIRECT) even when no proxy is configured for the scheme). Merged
   with (not overridden by) the process-wide default rules from `set_default_no_proxy()`.
