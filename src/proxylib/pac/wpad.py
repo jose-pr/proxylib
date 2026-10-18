@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import socket
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as _FutureTimeoutError
 from typing import Dict, Iterator, List, Optional, Tuple
 from urllib.error import URLError
 
+from .. import _net
 from . import PAC, load
 
 __all__ = ("discover",)
@@ -24,24 +23,15 @@ __all__ = ("discover",)
 # DNS lookups and HTTP probes with multi-second timeouts on every call.
 _cache: "Dict[str, Tuple[float, Optional[PAC]]]" = {}
 
-# socket.gethostbyname has no timeout parameter -- the HTTP fetch below
-# already has one (`load(..., timeout=timeout)`), but a DNS server that
-# never replies would otherwise block this function indefinitely. Run
-# resolution in a worker thread and give up after `timeout` seconds;
-# there's no portable way to actually cancel a blocking C-level DNS call,
-# so an abandoned lookup keeps running in the background until it finishes
-# or errors on its own -- the result is just discarded. A small persistent
-# pool (never shut down) avoids blocking on ThreadPoolExecutor.__exit__,
-# which waits for in-flight work.
-_resolver_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="proxylib-wpad-dns")
+
+@_net.register_cache
+def _clear_cache() -> None:
+    _cache.clear()
 
 
 def _resolve_with_timeout(host: str, timeout: float) -> "Optional[str]":
-    future = _resolver_executor.submit(socket.gethostbyname, host)
-    try:
-        return future.result(timeout=timeout)
-    except (_FutureTimeoutError, OSError):
-        return None
+    ip = _net.resolve_ip(host, timeout=timeout)
+    return str(ip) if ip is not None else None
 
 
 # Second-level labels that country-code registries sell names under

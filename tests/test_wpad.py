@@ -27,14 +27,14 @@ def test_resolve_with_timeout_gives_up_on_a_hanging_socket_call(monkeypatch):
 
     release = threading.Event()
 
-    def hanging_gethostbyname(host):
+    def hanging_getaddrinfo(*args, **kwargs):
         release.wait(timeout=5.0)  # simulates a DNS server that never replies
-        return "10.0.0.1"
+        return []
 
-    monkeypatch.setattr(wpad.socket, "gethostbyname", hanging_gethostbyname)
+    monkeypatch.setattr("socket.getaddrinfo", hanging_getaddrinfo)
 
     start = time.monotonic()
-    result = wpad._resolve_with_timeout("wpad.example.com", 0.1)
+    result = wpad._resolve_with_timeout("wpad.hang.test", 0.1)
     elapsed = time.monotonic() - start
 
     release.set()  # let the abandoned worker thread finish so it doesn't leak past the test
@@ -43,16 +43,17 @@ def test_resolve_with_timeout_gives_up_on_a_hanging_socket_call(monkeypatch):
 
 
 def test_discover_returns_none_when_no_wpad_host_resolves(monkeypatch):
-    monkeypatch.setattr(
-        "socket.gethostbyname", lambda host: (_ for _ in ()).throw(OSError())
-    )
+    monkeypatch.setattr(wpad._net, "resolve_ip", lambda host, **kw: None)
     assert discover("host.corp.example.com") is None
 
 
 def test_discover_loads_pac_from_first_resolving_wpad_host(monkeypatch):
+    import ipaddress
+
     monkeypatch.setattr(
-        "socket.gethostbyname",
-        lambda host: "10.0.0.1" if host == "wpad.example.com" else (_ for _ in ()).throw(OSError()),
+        wpad._net,
+        "resolve_ip",
+        lambda host, **kw: ipaddress.ip_address("10.0.0.1") if host == "wpad.example.com" else None,
     )
 
     sentinel = PAC()

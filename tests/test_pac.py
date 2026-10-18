@@ -249,13 +249,13 @@ def test_dns_resolve_caches_within_ttl(monkeypatch):
 
     calls = []
 
-    def fake_get_ip(host):
+    def fake_get_ip(host, **kwargs):
         calls.append(host)
         import ipaddress
 
         return ipaddress.ip_address("1.2.3.4")
 
-    monkeypatch.setattr(pac_module, "get_ip", fake_get_ip)
+    monkeypatch.setattr(pac_module._net, "resolve_ip", fake_get_ip)
 
     assert pac_module.PAC.dnsResolve("example.com") == "1.2.3.4"
     assert pac_module.PAC.dnsResolve("example.com") == "1.2.3.4"
@@ -267,11 +267,11 @@ def test_dns_resolve_cache_ttl_zero_bypasses_cache(monkeypatch):
 
     calls = []
 
-    def fake_get_ip(host):
+    def fake_get_ip(host, **kwargs):
         calls.append(host)
         return None
 
-    monkeypatch.setattr(pac_module, "get_ip", fake_get_ip)
+    monkeypatch.setattr(pac_module._net, "resolve_ip", fake_get_ip)
 
     pac_module.PAC.dnsResolve("example.com", cache_ttl=0)
     pac_module.PAC.dnsResolve("example.com", cache_ttl=0)
@@ -283,11 +283,11 @@ def test_dns_resolve_caches_negative_results(monkeypatch):
 
     calls = []
 
-    def fake_get_ip(host):
+    def fake_get_ip(host, **kwargs):
         calls.append(host)
         return None
 
-    monkeypatch.setattr(pac_module, "get_ip", fake_get_ip)
+    monkeypatch.setattr(pac_module._net, "resolve_ip", fake_get_ip)
 
     assert pac_module.PAC.dnsResolve("nowhere.invalid") is None
     assert pac_module.PAC.dnsResolve("nowhere.invalid") is None

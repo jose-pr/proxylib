@@ -4,11 +4,9 @@ Select which one :class:`~proxylib.pac.javascript.JSContext` uses via the
 ``PROXYLIB_JS_ENGINE`` env var -- a **comma-separated** priority list (e.g.
 ``"dukpy,quickjs"``), one delimiter only. Each entry is tried in order;
 the first one that's actually installed wins. Unset defaults to
-``("quickjs", "dukpy")`` -- quickjs is the closer-to-spec/faster engine
-when its (optional, C-extension) dependency happens to be installed;
-``proxylib[jspac]`` still installs plain `dukpy` (pure-Python wheel, no C
-toolchain risk) as the "any working engine" default, and dukpy remains the
-runtime fallback when quickjs isn't present.
+``("quickjs", "dukpy")``. ``proxylib[pac]`` installs quickjs (closer to
+the spec, has execution limits); ``proxylib[dukpy]`` installs dukpy, a
+wheel that also exists where quickjs has none (Windows ARM64).
 """
 
 from __future__ import annotations

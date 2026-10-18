@@ -92,7 +92,7 @@ class JSContext(metaclass=JSContextMeta):
         if engine_cls is None:
             raise ImportError(
                 "No PAC JS engine is installed -- install one of the optional "
-                "extras: proxylib[jspac] (dukpy) or proxylib[quickjs]."
+                "extras: proxylib[pac] (quickjs) or proxylib[dukpy]."
             )
         engine = engine_cls()
         # Neither dukpy nor quickjs tolerates two threads in one context (an

@@ -15,6 +15,7 @@ import threading
 import warnings
 from typing import Callable, Dict, List, Optional, Tuple
 
+from .exceptions import MissingExtraError
 from .proxy import ProxyMap
 
 __all__ = ("patch", "unpatch", "register_patcher")
@@ -41,6 +42,8 @@ def register_patcher(name: str, patch_func: PatchFunc, unpatch_func: UnpatchFunc
 def patch(proxymap: ProxyMap, targets: "Optional[List[str]]" = None) -> None:
     """Globally wire ``proxymap`` into ``targets`` (default: every registered target).
 
+    With the default, a target whose client library is not installed is
+    skipped; naming it in ``targets`` raises :class:`MissingExtraError`.
     Calling this while already patched **replaces** the previous patch
     (with a warning) rather than stacking -- there is one active resolver
     at a time, not a layered set.
@@ -62,7 +65,12 @@ def patch(proxymap: ProxyMap, targets: "Optional[List[str]]" = None) -> None:
                 if name not in _registry:
                     raise KeyError(f"No patcher registered for {name!r}")
                 patch_func, _ = _registry[name]
-                patch_func(proxymap)
+                try:
+                    patch_func(proxymap)
+                except MissingExtraError:
+                    if targets is not None:
+                        raise
+                    continue
                 applied.append(name)
         except BaseException:
             # Partial failure: undo whatever *did* apply before propagating,
@@ -100,7 +108,10 @@ _requests_original_init: "Optional[Callable]" = None
 
 def _patch_requests(proxymap: ProxyMap) -> None:
     global _requests_original_init
-    import requests
+    try:
+        import requests
+    except ImportError:
+        raise MissingExtraError("the requests patch target", name="requests") from None
 
     from .integrations.requests import ProxyMapAdapter
 
@@ -118,19 +129,14 @@ def _patch_requests(proxymap: ProxyMap) -> None:
 
 def _unpatch_requests() -> None:
     global _requests_original_init
-    import requests
-
     if _requests_original_init is not None:
+        import requests
+
         requests.Session.__init__ = _requests_original_init
         _requests_original_init = None
 
 
-try:
-    import requests as _requests  # noqa: F401
-
-    register_patcher("requests", _patch_requests, _unpatch_requests)
-except ImportError:
-    pass
+register_patcher("requests", _patch_requests, _unpatch_requests)
 
 
 _urllib_original_opener = None

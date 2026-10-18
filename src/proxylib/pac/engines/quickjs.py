@@ -1,4 +1,4 @@
-"""``quickjs``-backed :class:`~proxylib.pac.engines.base.JSEngine` (the ``proxylib[quickjs]`` extra).
+"""``quickjs``-backed :class:`~proxylib.pac.engines.base.JSEngine` (the ``proxylib[pac]`` extra).
 
 Unlike dukpy, ``quickjs.Context.add_callable(name, func)`` registers ``func``
 directly as a named global (no bridge-function indirection needed).

@@ -1,8 +1,8 @@
 """PAC (Proxy Auto-Config) support: the standard Netscape utility functions a
 PAC script's ``FindProxyForURL`` relies on, plus the common Microsoft
 ``*Ex``/IPv6-aware extensions, and loading PAC scripts (as plain Python via
-subclassing, or as real JS via an optional engine backend -- ``proxylib[jspac]``
-(dukpy) or ``proxylib[quickjs]``, see :mod:`proxylib.pac.engines`).
+subclassing, or as real JS via an optional engine backend -- ``proxylib[pac]``
+(quickjs) or ``proxylib[dukpy]``, see :mod:`proxylib.pac.engines`).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from urllib.request import ProxyHandler as _ProxyHandler
 from urllib.request import build_opener as _build_opener
 from warnings import warn as _warn
 
-from ..netutils import get_ip
+from .. import _net
 from ..proxy import Proxy, ProxyMap, UriSplit
 
 _WEEKDAY = _Literal["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
@@ -60,6 +60,7 @@ _urlopen = _build_opener(_ProxyHandler({})).open
 _dns_cache: "_Dict[str, _Tuple[float, _Optional[str]]]" = {}
 
 
+@_net.register_cache
 def clear_dns_cache() -> None:
     _dns_cache.clear()
 
@@ -107,7 +108,7 @@ class PAC(ProxyMap):
             cached = _dns_cache.get(host)
             if cached is not None and (_time.monotonic() - cached[0]) < cache_ttl:
                 return cached[1]
-        ip = get_ip(host)
+        ip = _net.resolve_ip(host)
         result = ip.exploded if ip else None
         if cache_ttl:
             _dns_cache[host] = (_time.monotonic(), result)
@@ -363,12 +364,11 @@ try:
     from .engines import get_engine_class
     from .javascript import JSContext
 
-    # Importing javascript.py always succeeds now (it no longer imports a
-    # specific engine directly) -- _jspac must instead reflect whether any
-    # engine (dukpy, quickjs, ...) is actually installed.
-    _jspac = get_engine_class() is not None
+    # javascript.py imports no engine itself, so whether any engine is
+    # installed has to be asked separately.
+    _have_engine = get_engine_class() is not None
 
-    if _jspac:
+    if _have_engine:
 
         class _JSProxyAutoConfigMeta(type(JSContext), type(PAC)):  # type: ignore[misc]
             """Joins JSContext's export-collecting metaclass with the Protocol
@@ -389,14 +389,14 @@ try:
         JSProxyAutoConfig = None
 except ImportError:
 
-    _jspac = False
+    _have_engine = False
     JSProxyAutoConfig = None
 
 
 # (monotonic timestamp, result) per URL, for genuine network downloads only
 # (never for file:/inline-JS sources -- those are free to re-read/re-parse).
 # clear_download_cache() is the seam tests use, same shape as pac.wpad's
-# _cache and netutils' interfaces cache.
+# _cache.
 _download_cache: "_Dict[str, _Tuple[float, PAC]]" = {}
 
 # Seconds, applied when the caller passes no timeout= of its own.
@@ -405,6 +405,7 @@ _DEFAULT_TIMEOUT = 10.0
 _MAX_PAC_BYTES = 1024 * 1024
 
 
+@_net.register_cache
 def clear_download_cache() -> None:
     _download_cache.clear()
 
@@ -412,8 +413,8 @@ def clear_download_cache() -> None:
 def load(url: str, cache_ttl: "_Optional[float]" = 300.0, **urllib_kwds) -> PAC:
     """Load a PAC script from a URL, a ``file:`` path, or inline JS source.
 
-    Requires a JS engine -- ``proxylib[jspac]`` (dukpy) or
-    ``proxylib[quickjs]`` -- to actually execute the script; without one, a
+    Requires a JS engine -- ``proxylib[pac]`` (quickjs) or
+    ``proxylib[dukpy]`` -- to actually execute the script; without one, a
     warning is issued and an always-DIRECT :class:`PAC` is returned instead.
 
     Genuine network downloads (not ``file:`` paths or inline JS) are cached
@@ -453,8 +454,8 @@ def load(url: str, cache_ttl: "_Optional[float]" = 300.0, **urllib_kwds) -> PAC:
 
     if "FindProxyForURL" not in js:
         raise ValueError(f"No FindProxyForURL found in response from: {url}")
-    if not _jspac:
-        _warn(f"Cannot load js from: {url} as pac. Install proxylib[jspac]")
+    if not _have_engine:
+        _warn(f"Cannot load js from: {url} as pac. Install proxylib[pac] or proxylib[dukpy]")
         result = PAC()
     else:
         result = JSProxyAutoConfig(js)

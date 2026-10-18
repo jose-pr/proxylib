@@ -7,7 +7,7 @@ import os
 import warnings
 from typing import Iterable, List, Optional, Tuple, Union
 
-from .netutils import get_ip, get_local_interfaces, is_loopback_or_link_local
+from . import _net
 from .proxy import URL, Proxy, ProxyMap, SimpleProxyMap
 
 __all__ = ("EnvProxyConfig", "set_default_no_proxy", "get_default_no_proxy")
@@ -164,9 +164,8 @@ class EnvProxyConfig(ProxyMap):
             # wildcard was always going to make irrelevant. (Still after
             # URL.from_str, so a malformed key raises ValueError either way.)
             return [None]
-        # Resolve DNS lazily: get_ip() is a blocking gethostbyname() call,
-        # only needed for "<local>" entries -- don't pay it per lookup when
-        # no_proxy has none (the overwhelmingly common case).
+        # Name resolution blocks and only "<local>" entries need it, so it
+        # happens inside that branch, never once per lookup.
         ip_literal: "Optional[Union[_ip.IPv4Address, _ip.IPv6Address]]" = None
         ip_literal_checked = False
         for entry in self.no_proxy:
@@ -174,12 +173,12 @@ class EnvProxyConfig(ProxyMap):
                 # "<local>": bypass the proxy for loopback/link-local addresses
                 # (shared with ConfigurableProxyMap's bypass_local=) and for
                 # addresses on the same subnet as a local interface.
-                ip = get_ip(uri.host)
+                ip = _net.resolve_ip(uri.host)
                 if ip is None:
                     continue
-                if is_loopback_or_link_local(ip):
+                if _net.is_link_scoped(ip):
                     return [None]
-                for _if in get_local_interfaces():
+                for _if in _net.local_networks():
                     if ip in _if.network:
                         return [None]
             elif isinstance(entry, (_ip.IPv4Network, _ip.IPv6Network)):

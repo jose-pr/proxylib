@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Work toward 2.0, which breaks the 1.x API.
+
+### Added
+
+- `proxylib.exceptions`: `ProxylibError` and its subclasses `ProxyParseError`
+  (also a `ValueError`), `PACError`, `NoReachableProxyError` (also a
+  `LookupError`) and `MissingExtraError` (also an `ImportError`), re-exported at
+  top level. None of them is a `KeyError`, which keeps meaning "no opinion".
+- `proxylib.clear_caches()` drops every module-level cache in one call.
+- `proxylib.__all__` declares the public surface.
+
+### Changed
+
+- proxylib now depends on `netimps>=0.4.0,<0.5` for host:port handling, local
+  interfaces (real prefix lengths on every OS, no extra needed), bounded name
+  lookups and TCP probes. `import proxylib` imports neither it nor `requests`.
+- Extras: `proxylib[pac]` installs the quickjs engine and `proxylib[dukpy]` the
+  dukpy one; `jspac`, `quickjs` and `ifaddr` are gone.
+- `ProxyMapAdapter` is always a class: constructing it without `requests`
+  raises `MissingExtraError` instead of the name being `None`.
+- `patch()` registers its `"requests"` target whether or not `requests` is
+  installed; with no `targets` a missing client is skipped, and naming it
+  raises `MissingExtraError`.
+- WPAD and PAC `dnsResolve` lookups are bounded by a timeout.
+
+### Removed
+
+- `proxylib.netutils` and the top-level `first_working_proxy`; use
+  `ConfigurableProxyMap(probe=True)` for reachability probing.
+
 ## [1.1.0] - 2026-10-18
 
 ### Added

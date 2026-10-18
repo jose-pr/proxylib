@@ -43,9 +43,9 @@ can't express "explicitly DIRECT", only set/absent).
   - `cache_ttl` (seconds, `None`/falsy disables) — per-effective-URL cache of the
     decorated map's answer, at most `cache_maxsize` URLs (least recently used dropped
     first); `clear_cache()`.
-  - `probe=True` — resolves to the first reachable entry via
-    `netutils.first_working_proxy`; a `LookupError` (nothing reachable) becomes
-    `KeyError` here, not a silent DIRECT.
+  - `probe=True` — resolves to the first entry whose port accepts a TCP connection
+    (unreachable proxies are skipped for 30 s); nothing reachable becomes `KeyError`
+    here, not a silent DIRECT.
   - `round_robin=True` — rotates the result tuple each call, cached or not, so a
     different entry leads while preserving the rest as fallback (thread-safe).
   - `browser_compatibility=True` — strips path/query/fragment from HTTPS URLs before
@@ -67,7 +67,7 @@ can't express "explicitly DIRECT", only set/absent).
   `.`-suffix match, curl convention), CIDR (`10.0.0.0/8`; matches IP-literal request
   hosts only, never resolved hostnames — an IPv6 CIDR entry parses but cannot match
   yet, because a bracketed IPv6 request host is not parsed), `"<local>"`
-  (loopback/link-local/same-subnet, needs the `ifaddr` extra for full accuracy), or
+  (loopback/link-local/same-subnet, using real interface prefixes), or
   `"*"` (bypass **everything**; as the whole value this matches curl/`requests`/stdlib,
   but unlike them a `*` anywhere in the list also bypasses everything — checked ahead of every
   other rule, so it never pays for a `<local>` DNS lookup, and it yields `[None]`
@@ -130,9 +130,9 @@ can't express "explicitly DIRECT", only set/absent).
   into the engine are serialised per instance, so one map is safe to share between
   threads. Which
   engine: the `PROXYLIB_JS_ENGINE` env var, a **comma-separated** priority list (e.g.
-  `"dukpy,quickjs"`); unset defaults to `("quickjs", "dukpy")`. `proxylib[jspac]`
-  installs plain `dukpy`; `proxylib[quickjs]` installs `quickjs`/`quickjs-ng` depending
-  on the Python version.
+  `"dukpy,quickjs"`); unset defaults to `("quickjs", "dukpy")`. `proxylib[pac]`
+  installs `quickjs`/`quickjs-ng` depending on the Python version; `proxylib[dukpy]`
+  installs `dukpy` (the one with a Windows ARM64 wheel).
 - **`load(url, cache_ttl=300.0, **urllib_kwds) -> PAC`** (top-level alias:
   `proxylib.load_pac`) — load a PAC script from a URL, a `file:` path, or inline JS
   source (detected via a `"FindProxyForURL("` substring check). Without a JS engine
@@ -166,6 +166,8 @@ can't express "explicitly DIRECT", only set/absent).
 - **`register_patcher(name, patch_func, unpatch_func)`** — register a custom
   integration. `patch_func(proxymap)` applies it; `unpatch_func()` (no args — capture
   state in a closure) undoes it. Re-registering an existing `name` replaces it.
+- `patch(proxymap)` with no `targets` skips a built-in target whose client is not
+  installed; naming it in `targets` raises `MissingExtraError`.
 - Built-in targets: `"requests"` wraps `requests.Session.__init__` so newly constructed
   sessions mount a `ProxyMapAdapter` (sessions created *before* `patch()` are
   untouched); `"urllib"` installs a global opener via
@@ -173,8 +175,9 @@ can't express "explicitly DIRECT", only set/absent).
 
 ## `requests`/`urllib` integrations (`proxylib.integrations`)
 
-- **`ProxyMapAdapter(proxymap, *args, **kwargs)`** (`.requests`; `None` if `requests`
-  isn't installed) — a `requests.adapters.HTTPAdapter` subclass; hooks `send()` so it
+- **`ProxyMapAdapter(proxymap, *args, **kwargs)`** (`.requests`; looking the name up
+  imports `requests`, and constructing it without `requests` raises
+  `MissingExtraError`) — a `requests.adapters.HTTPAdapter` subclass; hooks `send()` so it
   sees the real request URL (scheme, host, and path). An explicit `proxies=` entry at
   the same `scheme://hostname` key still wins (matches `requests.utils.select_proxy`
   precedence); a less-specific key (bare `"http"`, or env-injected) does not.
@@ -192,27 +195,32 @@ can't express "explicitly DIRECT", only set/absent).
   `.setdefault(url, value)` is a no-op (requests calls it to merge env proxies; the
   `ProxyMap` wins).
 
-## Network helpers (`proxylib.netutils`)
+## Exceptions (`proxylib.exceptions`, all re-exported at top level)
 
-- **`first_working_proxy(proxies, timeout=5.0, circuit_breaker_ttl=30.0,
-  clock=time.monotonic) -> Proxy | None`** (top-level) — failover helper: returns the
-  first entry (in order) that accepts a TCP connection to its port; `None` (DIRECT) is
-  returned immediately without probing. Raises `LookupError` if nothing is reachable
-  (can't return `None` for that — `None` means DIRECT). A proxy that fails its probe is
-  blacklisted (skipped without re-probing) for `circuit_breaker_ttl` seconds;
-  `clear_circuit_breaker()` resets it. `0`/`None` disables the breaker.
-- **`get_ip(address) -> IPv4Address | IPv6Address | None`** — resolve a hostname or IP
-  literal.
-- **`get_local_interfaces(cache_ttl=10.0) -> list[IPv4Interface | IPv6Interface]`** —
-  this host's interfaces; accurate with the `ifaddr` extra, else a host-route-only
-  (`/32`/`/128`) stdlib fallback. `clear_interfaces_cache()` resets the cache.
-- **`get_default_port(scheme) -> int | None`** — conventional port for a scheme
-  (`http`/`https`/`ftp`/`socks*` plus `getservbyname` fallback).
-- **`is_loopback_or_link_local(ip) -> bool`** — loopback (`127/8`, `::1`) or link-local
-  (`169.254/16`, `fe80::/10`).
+- **`ProxylibError`** — base of every error proxylib raises.
+- **`ProxyParseError(ProxylibError, ValueError)`** — text that should name a proxy or a
+  PAC result could not be parsed.
+- **`PACError(ProxylibError)`** — a PAC script raised, ran out of time, or could not be
+  loaded as a script.
+- **`NoReachableProxyError(ProxylibError, LookupError)`** — no offered proxy accepted a
+  connection (`ConfigurableProxyMap(probe=True)` turns it into `KeyError`).
+- **`MissingExtraError(ProxylibError, ImportError)`** — an optional dependency is not
+  installed; `.extra` is the proxylib extra (or `None`), `.name` the missing module, and
+  the message gives the `pip install` line.
+- None of them subclasses `KeyError`: `KeyError` from a map always means "no opinion".
+
+## Caches
+
+- **`clear_caches()`** (top level) — drops every cache proxylib keeps: downloaded PAC
+  scripts, PAC `dnsResolve` answers, WPAD results, GNOME/MATE settings, local
+  interfaces and the unreachable-proxy blacklist. (`ConfigurableProxyMap` instances
+  keep their own cache: `clear_cache()`.)
 
 ## Package metadata
 
 - **`proxylib.__version__`** — resolved lazily (PEP 562 `__getattr__`) from installed
   package metadata (`importlib.metadata.version("proxylib")`); costs nothing at import
   time and never drifts from `pyproject.toml`.
+- **Dependencies** — one required: `netimps>=0.4.0,<0.5` (network helpers, no
+  dependencies of its own). `import proxylib` imports neither it nor any optional
+  client library; each is imported when first used. Extras: `pac` (quickjs), `dukpy`.

@@ -17,7 +17,7 @@ from typing import Dict, Iterable, Optional, Protocol, Sequence, Tuple, Union, r
 from urllib.parse import urlsplit, urlunsplit
 
 from ._uri import URL, UriSplit, _URI
-from .netutils import first_working_proxy
+from ._net import first_working_proxy
 
 __all__ = [
     "Proxy",
@@ -269,9 +269,8 @@ class ConfigurableProxyMap(ProxyMap):
         # matching and the global no_proxy defaults, for free.
         bypass_rules = list(no_proxy or ())
         if bypass_local:
-            # <local> already covers loopback + link-local (env.py shares
-            # netutils.is_loopback_or_link_local for that) plus same-subnet
-            # addresses -- a superset of what bypass_local asks for.
+            # <local> covers loopback, link-local and same-subnet addresses,
+            # a superset of what bypass_local asks for.
             bypass_rules.append("<local>")
         from .env import EnvProxyConfig, get_default_no_proxy
 

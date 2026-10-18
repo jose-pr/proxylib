@@ -12,7 +12,7 @@ import re
 from enum import Enum
 from typing import NamedTuple, Optional, Union
 
-from . import netutils
+from . import _net
 
 ALPHA = r"A-Za-z"
 DIGIT = r"0-9"
@@ -68,7 +68,7 @@ class _URI(NamedTuple):
             self.username,
             self.password,
             self.host,
-            netutils.get_default_port(self.scheme),
+            _net.default_port(self.scheme),
         )
 
     def as_uri(self) -> str:

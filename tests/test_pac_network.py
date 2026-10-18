@@ -62,7 +62,7 @@ def test_load_raises_when_nothing_listens():
 
 
 def test_load_without_an_engine_warns_and_returns_direct(http_server, monkeypatch):
-    monkeypatch.setattr(pac, "_jspac", False)
+    monkeypatch.setattr(pac, "_have_engine", False)
     http_server.route("/proxy.pac", _SCRIPT)
     with pytest.warns(UserWarning):
         result = pac.load(http_server.url("/proxy.pac"))

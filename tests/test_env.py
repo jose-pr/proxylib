@@ -64,10 +64,10 @@ def test_no_proxy_cidr_ipv6_entry_parses_correctly():
 def test_no_proxy_cidr_does_not_match_hostname_without_resolving(monkeypatch):
     import proxylib.env as env
 
-    def boom(host):
+    def boom(host, **kwargs):
         raise AssertionError("DNS resolution attempted for a CIDR NO_PROXY entry")
 
-    monkeypatch.setattr(env, "get_ip", boom)
+    monkeypatch.setattr(env._net, "resolve_ip", boom)
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["10.0.0.0/8"])
     assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
 
@@ -117,10 +117,10 @@ def test_env_accepts_trailing_slash_proxy_urls():
 def test_env_does_not_resolve_dns_without_local_entry(monkeypatch):
     import proxylib.env as env
 
-    def boom(host):
+    def boom(host, **kwargs):
         raise AssertionError("DNS resolution attempted without a <local> entry")
 
-    monkeypatch.setattr(env, "get_ip", boom)
+    monkeypatch.setattr(env._net, "resolve_ip", boom)
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["other.com"])
     assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
 
@@ -148,10 +148,10 @@ def test_no_proxy_star_short_circuits_before_local_dns(monkeypatch):
     # blocking gethostbyname().
     import proxylib.env as env
 
-    def boom(host):
+    def boom(host, **kwargs):
         raise AssertionError("DNS resolved despite a '*' NO_PROXY entry")
 
-    monkeypatch.setattr(env, "get_ip", boom)
+    monkeypatch.setattr(env._net, "resolve_ip", boom)
     cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>", "*"])
     assert cfg["http://example.com"] == [None]
 

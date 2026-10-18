@@ -8,13 +8,10 @@ from proxylib import (
     ProxyMapHandler,
     SimpleProxyMap,
     auto_proxy,
-    netutils,
 )
 
 # Auto-detect the system/env proxy (or fall back to WPAD discovery).
 proxymap = auto_proxy()
-
-addrs = netutils.get_local_interfaces()
 
 # Recommended requests integration: mount a ProxyMapAdapter so every request's
 # real URL (not just its scheme/host) is matched against the ProxyMap.

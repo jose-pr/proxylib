@@ -9,6 +9,7 @@ import subprocess
 import time
 from typing import Dict, Optional, Tuple, Union
 
+from ... import _net
 from ...env import EnvProxyConfig
 from ...pac.wpad import discover as _wpad_discover
 from ...proxy import ProxyMap
@@ -24,6 +25,7 @@ _recursive_cache: "Dict[str, Tuple[float, Dict[Tuple[str, str], str]]]" = {}
 _CACHE_TTL = 10.0
 
 
+@_net.register_cache
 def clear_gsettings_cache() -> None:
     _recursive_cache.clear()
 

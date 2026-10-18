@@ -1,4 +1,4 @@
-"""``dukpy``-backed :class:`~proxylib.pac.engines.base.JSEngine` (the ``proxylib[jspac]`` extra)."""
+"""``dukpy``-backed :class:`~proxylib.pac.engines.base.JSEngine` (the ``proxylib[dukpy]`` extra)."""
 
 from __future__ import annotations
 

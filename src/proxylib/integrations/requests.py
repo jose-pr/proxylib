@@ -1,8 +1,7 @@
 """``requests`` integration.
 
 ``ProxyMapAdapter`` (requires the ``requests`` package -- ``pip install
-requests``; this integration activates whenever ``requests`` happens to be
-installed, there is no proxylib extra to enable it) is
+requests``; there is no proxylib extra for it) is
 the recommended way to wire a ``ProxyMap`` into a ``requests.Session`` — it
 hooks ``HTTPAdapter.send()``, so it sees the real request URL. For the
 simpler proxies-dict style (``requests.get(url, proxies=...)``) use
@@ -14,14 +13,34 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
+from ..exceptions import MissingExtraError
 from ..proxy import ProxyMap
 
 __all__ = ("ProxyMapAdapter",)
 
 
-try:
-    from requests import PreparedRequest
-    from requests.adapters import HTTPAdapter
+# requests is imported when ProxyMapAdapter is first looked up, not when
+# proxylib is imported; the class subclasses requests' HTTPAdapter, so it can
+# only be built once requests is importable.
+
+
+def _build_adapter_class() -> type:
+    try:
+        from requests import PreparedRequest
+        from requests.adapters import HTTPAdapter
+    except ImportError:
+
+        class ProxyMapAdapter:  # type: ignore[no-redef]
+            """Placeholder: ``requests`` is not installed."""
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                raise MissingExtraError("ProxyMapAdapter", name="requests")
+
+        return ProxyMapAdapter
+
+    # send()'s annotation names PreparedRequest; typing.get_type_hints looks
+    # names up in this module's globals.
+    globals().setdefault("PreparedRequest", PreparedRequest)
 
     class ProxyMapAdapter(HTTPAdapter):
         """A Transport Adapter that resolves the proxy per-request from a ``ProxyMap``.
@@ -76,5 +95,12 @@ try:
             kwargs["proxies"] = proxies
             return super().send(request, **kwargs)
 
-except ImportError:
-    ProxyMapAdapter = None
+    return ProxyMapAdapter
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ProxyMapAdapter":
+        cls = _build_adapter_class()
+        globals()["ProxyMapAdapter"] = cls
+        return cls
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
