@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- `EnvProxyConfig.from_env()` ignores `HTTP_PROXY` inside a CGI request
+  (`REQUEST_METHOD` set), where a client's `Proxy:` header can set it
+  (httpoxy, CVE-2016-5385). Only an exact lowercase `http_proxy` is used there,
+  as in `urllib.request.getproxies_environment`; on Windows, where environment
+  names are case-insensitive, neither is.
+- WPAD discovery no longer walks up to a public suffix: for
+  `host.example.co.uk` it tries `wpad.example.co.uk` only, never
+  `wpad.co.uk`, which anyone can register.
+- `Proxy`'s `repr()` and `str()` show `password='***'` instead of the password.
+  `as_uri()` still includes it.
+
+### Fixed
+
+- One PAC map shared between threads no longer crashes the interpreter. Both
+  JS engines abort when two threads enter one context; calls into the engine
+  are now serialised per PAC instance.
+- macOS `system_proxy()` no longer raises on the default bypass list:
+  abbreviated IPv4 CIDR such as `169.254/16` is accepted in every `NO_PROXY`
+  list, and an entry that still cannot be parsed is skipped with a warning
+  instead of failing the whole configuration.
+- `pac.load()` downloads time out after 10 seconds unless `timeout=` is
+  passed, refuse a body over 1 MiB (Chromium's limit) with `ValueError`, and
+  decode a script that is not UTF-8 as Latin-1 instead of raising.
+
 ## [1.0.2] - 2026-08-16
 
 ### Added

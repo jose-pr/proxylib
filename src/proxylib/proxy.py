@@ -66,6 +66,15 @@ class Proxy(_URI):
     def url(self) -> str:
         return f"{self.scheme}://{self.netloc}"
 
+    def __repr__(self) -> str:
+        # Proxies end up in logs and tracebacks; the password never does.
+        # as_uri() still carries it for clients that need it.
+        password = "***" if self.password else ""
+        return (
+            f"{type(self).__name__}(scheme={self.scheme!r}, username={self.username!r}, "
+            f"password={password!r}, host={self.host!r}, port={self.port!r})"
+        )
+
 
 @runtime_checkable
 class ProxyMap(Protocol):

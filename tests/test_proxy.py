@@ -352,3 +352,12 @@ def test_package_exposes_version():
     import proxylib
 
     assert isinstance(proxylib.__version__, str) and proxylib.__version__
+
+
+def test_proxy_repr_and_str_mask_the_password():
+    proxy = Proxy.from_str("http://alice:s3cret@proxy:8080")
+    assert "s3cret" not in repr(proxy)
+    assert "s3cret" not in str(proxy)
+    assert "password='***'" in repr(proxy)
+    assert proxy.as_uri() == "http://alice:s3cret@proxy:8080"
+    assert "password=''" in repr(Proxy.from_str("http://proxy:8080"))
