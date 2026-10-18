@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from proxylib import Proxy
@@ -216,3 +218,45 @@ def test_from_env_reads_upper_and_lower_case(monkeypatch):
     assert cfg["http://localhost"] == [None]
     assert cfg["http://example.com"] == [None]
     assert list(cfg["http://other.com"]) == [Proxy.from_str("http://proxy:80")]
+
+
+def test_no_proxy_accepts_abbreviated_ipv4_cidr():
+    # macOS ships "169.254/16" in its default bypass list.
+    cfg = EnvProxyConfig("http://proxy:80", None, ["169.254/16", "10/8"])
+    assert cfg["http://169.254.1.2/"] == [None]
+    assert cfg["http://10.1.2.3/"] == [None]
+    assert list(cfg["http://11.0.0.1/"]) == [Proxy.from_str("http://proxy:80")]
+
+
+def test_no_proxy_unparsable_entry_is_skipped_with_warning():
+    with pytest.warns(UserWarning, match="10.0.0.0/99"):
+        cfg = EnvProxyConfig("http://proxy:80", None, ["10.0.0.0/99", "example.com"])
+    assert cfg["http://example.com/"] == [None]
+    assert list(cfg["http://other.test/"]) == [Proxy.from_str("http://proxy:80")]
+
+
+def _clear_proxy_env(monkeypatch):
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY",
+                 "no_proxy", "REQUEST_METHOD"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_from_env_ignores_uppercase_http_proxy_inside_cgi(monkeypatch):
+    # httpoxy: a CGI server turns the client's "Proxy:" header into HTTP_PROXY.
+    _clear_proxy_env(monkeypatch)
+    monkeypatch.setenv("REQUEST_METHOD", "GET")
+    monkeypatch.setenv("HTTP_PROXY", "http://attacker:1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://trusted:3128")
+    cfg = EnvProxyConfig.from_env()
+    with pytest.raises(KeyError):
+        cfg["http://example.com/"]
+    assert list(cfg["https://example.com/"]) == [Proxy.from_str("http://trusted:3128")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="environment names are case-insensitive on Windows")
+def test_from_env_keeps_lowercase_http_proxy_inside_cgi(monkeypatch):
+    _clear_proxy_env(monkeypatch)
+    monkeypatch.setenv("REQUEST_METHOD", "GET")
+    monkeypatch.setenv("http_proxy", "http://trusted:3128")
+    cfg = EnvProxyConfig.from_env()
+    assert list(cfg["http://example.com/"]) == [Proxy.from_str("http://trusted:3128")]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress as _ip
 import os
+import warnings
 from typing import Iterable, List, Optional, Tuple, Union
 
 from .netutils import get_ip, get_local_interfaces, is_loopback_or_link_local
@@ -52,6 +53,28 @@ def get_default_no_proxy() -> "List[str]":
     return list(_default_no_proxy)
 
 
+def _expand_short_ipv4(cidr: str) -> str:
+    """Pad abbreviated IPv4 CIDR such as macOS's default ``169.254/16`` to
+    ``169.254.0.0/16``; anything else is returned unchanged."""
+    address, _, prefix = cidr.partition("/")
+    octets = address.split(".")
+    if len(octets) < 4 and all(octet.isdigit() for octet in octets):
+        address = ".".join(octets + ["0"] * (4 - len(octets)))
+    return f"{address}/{prefix}"
+
+
+def _parse_no_proxy_entries(entries: "Iterable[str]") -> "List[_NoProxyEntry]":
+    """Parse NO_PROXY entries, skipping (with a warning) any that cannot be
+    parsed: one bad entry in an OS bypass list must not disable the rest."""
+    parsed: "List[_NoProxyEntry]" = []
+    for entry in entries:
+        try:
+            parsed.append(_parse_no_proxy_entry(entry))
+        except ValueError as exc:
+            warnings.warn(f"Ignoring unparsable NO_PROXY entry {entry!r}: {exc}", stacklevel=3)
+    return parsed
+
+
 def _parse_no_proxy_entry(entry: str) -> _NoProxyEntry:
     """Parse one NO_PROXY entry: ``None`` for ``<local>``, ``_WILDCARD`` for
     ``*``, a network for CIDR notation, or (host, port) with a leading '.'
@@ -69,7 +92,7 @@ def _parse_no_proxy_entry(entry: str) -> _NoProxyEntry:
         # CIDR entry, e.g. "10.0.0.0/8" or "2001:db8::/32" -- parse the "/"
         # before the host:port split below, since IPv6 CIDRs contain ":"
         # and would be mangled by rpartition(":").
-        return _ip.ip_network(entry, strict=False)
+        return _ip.ip_network(_expand_short_ipv4(entry), strict=False)
     host, _, port = entry.rpartition(":")
     if not host:
         host, port = port, ""
@@ -130,7 +153,7 @@ class EnvProxyConfig(ProxyMap):
         # any entry bypasses the proxy) there's no override semantics to get
         # wrong here -- this just controls iteration order.
         merged = dict.fromkeys([*(no_proxy or ()), *get_default_no_proxy()])
-        self.no_proxy: "List[_NoProxyEntry]" = [_parse_no_proxy_entry(_no) for _no in merged]
+        self.no_proxy: "List[_NoProxyEntry]" = _parse_no_proxy_entries(merged)
 
     def __getitem__(self, url: str) -> Iterable[Optional[Proxy]]:
         uri = URL.from_str(url)
@@ -183,7 +206,14 @@ class EnvProxyConfig(ProxyMap):
     def from_env() -> "EnvProxyConfig":
         """Build an ``EnvProxyConfig`` from the process environment (upper or lowercase names)."""
         https = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-        http = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        if "REQUEST_METHOD" in os.environ:
+            # Inside a CGI request HTTP_PROXY can come from the client's
+            # "Proxy:" header (httpoxy, CVE-2016-5385). Only an exact lowercase
+            # http_proxy is trusted there, as in urllib.request.getproxies_environment;
+            # Windows environment names are case-insensitive, so none is.
+            http = os.environ.get("http_proxy") if os.name != "nt" else None
+        else:
+            http = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
         no_proxy = os.environ.get("NO_PROXY") or os.environ.get("no_proxy")
 
         return EnvProxyConfig(
