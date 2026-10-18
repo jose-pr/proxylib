@@ -47,8 +47,7 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
   `ProxyMapAdapter` but for the standard library's opener/handler system.
 - **Global patching** — `proxylib.patch(proxymap)` wires an active `ProxyMap` into
   newly created `requests.Session`s and a global `urllib` opener, without mounting an
-  adapter by hand; `proxylib.unpatch()` undoes it, and any `ProxyMap` also works
-  directly as a context manager (`with proxymap:`).
+  adapter by hand; `proxylib.unpatch()` undoes it.
 - **Decorators & composition** — `ChainProxyMap` for sequential fallback across
   multiple `ProxyMap`s, and `ConfigurableProxyMap` for opt-in caching, active
   reachability probing (with a circuit breaker for dead proxies), round-robin
@@ -126,21 +125,22 @@ from the `ProxyMap` instead of a static `{scheme: proxy_url}` dict, for the same
 ```python
 import proxylib
 
-with proxylib.auto_proxy():  # patch() on __enter__, unpatch() on __exit__
-    requests.get("https://example.com")  # any new Session picks up the active proxy
+proxylib.patch(proxylib.auto_proxy())
+requests.get("https://example.com")  # any new Session picks up the active proxy
+proxylib.unpatch()
 ```
 
-Outside a `with` block, call `proxylib.patch(proxymap)`/`proxylib.unpatch()` directly,
-or pass `targets=["requests"]`/`["urllib"]` to patch just one. Sessions created *before*
+Pass `targets=["requests"]`/`["urllib"]` to patch just one. Sessions created *before*
 `patch()` are untouched.
 
 ### From environment variables
 
 ```python
+import proxylib
 from proxylib import EnvProxyConfig
 
 proxymap = EnvProxyConfig.from_env()  # HTTP_PROXY / HTTPS_PROXY / NO_PROXY
-proxymap["https://example.com"]  # -> [Proxy(...)] or [None] for DIRECT
+proxylib.lookup(proxymap, "https://example.com")  # -> (Proxy(...),) or (None,) for DIRECT
 ```
 
 ### A fixed proxy, or DIRECT
@@ -162,9 +162,24 @@ proxymap = load_pac("file:./proxy.pac")
 proxymap["https://example.com/"]
 ```
 
-`ProxyMap(source)` is a small factory that picks the right implementation for you: a
-bare `scheme://host:port` string builds a `SimpleProxyMap`, while anything that looks
-like a PAC file/URL is loaded with `load_pac`.
+`from_source(value)` picks the right map for a configured value without doing any
+I/O: a proxy URL or PAC result string builds a `SimpleProxyMap`, a PAC location (a
+`file:` URL or an `http(s)` URL with a path) is loaded on the first lookup, and
+anything else indexable by URL is used as it is.
+
+### Any mapping is a proxy map
+
+A proxy map is anything indexable by request URL — a plain `dict` included, keyed
+the way `requests` keys its `proxies` (`"https"`, `"all"`, `"http://host"`). Read
+any map's answer with `lookup()`, which always returns a tuple of `Proxy` (or
+`None` for DIRECT):
+
+```python
+from proxylib import ChainProxyMap, auto_proxy, lookup
+
+proxymap = ChainProxyMap({"https": "http://corp-proxy:3128"}, auto_proxy())
+lookup(proxymap, "https://example.com/")  # -> (Proxy(scheme='http', host='corp-proxy', port=3128),)
+```
 
 ## API overview
 
