@@ -16,6 +16,7 @@ import socket as _socket
 import time as _time
 from functools import lru_cache as _lru_cache
 from types import MappingProxyType as _MappingProxyType
+from typing import Any as _Any
 from typing import Callable as _Callable
 from typing import Dict as _Dict
 from typing import Literal as _Literal
@@ -104,101 +105,107 @@ def shExpMatch(test: str, shexp: str, /) -> bool:
     return _shexp_regex(shexp).fullmatch(test) is not None
 
 
+def _now(gmt: bool) -> "_datetime.datetime":
+    """The current time: UTC for a PAC ``"GMT"`` argument, else local."""
+    return _datetime.datetime.now(_datetime.timezone.utc) if gmt else _datetime.datetime.now()
+
+
+def _split_gmt(args: tuple) -> "_Tuple[list, bool]":
+    values = list(args)
+    gmt = bool(values) and isinstance(values[-1], str) and values[-1].upper() == "GMT"
+    return (values[:-1] if gmt else values), gmt
+
+
+# weekdayRange, dateRange and timeRange follow Chromium's PAC library (which
+# Firefox shares), so a PAC gives the answer it gives in a browser.
+
+
 def weekdayRange(wd1: _WEEKDAY, /, *args: "_Union[_WEEKDAY, _Literal['GMT']]") -> bool:
-    args = list(args)
-    gmt = bool(args) and args[-1].upper() == "GMT"
-    if gmt:
-        args = args[:-1]
-    wd2 = args[0] if args else wd1
-
-    start = _WEEKDAYS.index(wd1.upper())
-    end = _WEEKDAYS.index(wd2.upper())
-    now = _datetime.datetime.now(_datetime.timezone.utc) if gmt else _datetime.datetime.now()
-    today = now.isoweekday() % 7
-
-    if start <= end:
-        return start <= today <= end
-    return today >= start or today <= end
+    """True on ``wd1`` (through ``wd2``, wrapping past Saturday); an unknown
+    day name is false."""
+    values, gmt = _split_gmt((wd1, *args))
+    names = [str(v).upper() for v in values[:2]]
+    if not names or any(name not in _WEEKDAYS for name in names):
+        return False
+    start = _WEEKDAYS.index(names[0])
+    end = _WEEKDAYS.index(names[-1])
+    today = _now(gmt).isoweekday() % 7
+    return start <= today <= end if start <= end else (today >= start or today <= end)
 
 
 def dateRange(*args) -> bool:
-    """Best-effort implementation of the PAC ``dateRange`` overload set.
-
-    Supports the documented call shapes: a single day/month/year, a
-    day/month/year range, ``(day1, month1, day2, month2)``,
-    ``(month1, year1, month2, year2)`` and
-    ``(day1, month1, year1, day2, month2, year2)``, each optionally
+    """PAC ``dateRange``: a day, month or year, or a range of them, optionally
     followed by ``"GMT"``.
+
+    A number below 32 is a day of the month, a larger one a year, a name a
+    month. One value matches that day, month or year. Otherwise the first half
+    of the values sets the start (from 1 January, 00:00:00, this year) and the
+    second half the end (from 31 December, 23:59:59), and a range whose start
+    is after its end wraps; with two values, a day keeps both ends in the
+    current month. ``dateRange(1, "JUN", 15, "AUG")``, ``dateRange("OCT", 1995,
+    "MAR", 1996)``. An unknown month name is false.
     """
-    args = list(args)
-    gmt = bool(args) and isinstance(args[-1], str) and args[-1].upper() == "GMT"
-    if gmt:
-        args = args[:-1]
-    now = _datetime.datetime.now(_datetime.timezone.utc) if gmt else _datetime.datetime.now()
-
-    def classify(value):
-        if isinstance(value, str):
-            return "month", _MONTHS.index(value.upper()) + 1
-        value = int(value)
-        return ("year", value) if value > 31 else ("day", value)
-
-    parts = [classify(a) for a in args]
-    current = {"day": now.day, "month": now.month, "year": now.year}
-    today = (now.year, now.month, now.day)
-
+    values, gmt = _split_gmt(args)
+    if not values:
+        return False
+    now = _now(gmt)
+    try:
+        parts = [_date_part(value) for value in values]
+    except ValueError:
+        return False
     if len(parts) == 1:
-        kind, val = parts[0]
-        return current[kind] == val
+        kind, value = parts[0]
+        return {"day": now.day, "month": now.month, "year": now.year}[kind] == value
+    start = [now.year, 1, 1, 0, 0, 0]
+    end = [now.year, 12, 31, 23, 59, 59]
+    index = {"year": 0, "month": 1, "day": 2}
+    half = len(parts) // 2
+    current_month = False
+    for kind, value in parts[:half]:
+        start[index[kind]] = value
+        current_month = current_month or (kind == "day" and len(parts) <= 2)
+    for kind, value in parts[half:]:
+        end[index[kind]] = value
+    if current_month:
+        start[1] = end[1] = now.month
+    moment = [now.year, now.month, now.day, now.hour, now.minute, now.second]
+    if start <= end:
+        return start <= moment <= end
+    return moment >= start or moment <= end
 
-    if len(parts) == 2 and parts[0][0] == parts[1][0]:
-        kind = parts[0][0]
-        lo, hi = parts[0][1], parts[1][1]
-        value = current[kind]
-        return lo <= value <= hi if lo <= hi else (value >= lo or value <= hi)
 
-    if len(parts) == 4:
-        kinds = [p[0] for p in parts]
-        if kinds == ["day", "month", "day", "month"]:
-            day1, month1, day2, month2 = (p[1] for p in parts)
-            start, end = (now.year, month1, day1), (now.year, month2, day2)
-        elif kinds == ["month", "year", "month", "year"]:
-            month1, year1, month2, year2 = (p[1] for p in parts)
-            start, end = (year1, month1, 1), (year2, month2, 31)
-        else:
-            return False
-        return start <= today <= end if start <= end else (today >= start or today <= end)
-
-    if len(parts) == 6:
-        day1, month1, year1, day2, month2, year2 = (p[1] for p in parts)
-        start, end = (year1, month1, day1), (year2, month2, day2)
-        return start <= today <= end if start <= end else (today >= start or today <= end)
-
-    return False
+def _date_part(value: _Any) -> "_Tuple[str, int]":
+    """``("day" | "month" | "year", value)`` for one ``dateRange`` argument;
+    ``ValueError`` for an unknown month name."""
+    if isinstance(value, str) and not value.strip().isdigit():
+        return "month", _MONTHS.index(value.strip().upper()) + 1
+    number = int(value)
+    return ("day", number) if number < 32 else ("year", number)
 
 
 def timeRange(*args) -> bool:
-    """PAC ``timeRange``: hour, hour-hour, hour:min-hour:min, or hour:min:sec range, +GMT."""
-    args = list(args)
-    gmt = bool(args) and isinstance(args[-1], str) and args[-1].upper() == "GMT"
-    if gmt:
-        args = args[:-1]
-    args = [int(a) for a in args]
-    now = _datetime.datetime.now(_datetime.timezone.utc) if gmt else _datetime.datetime.now()
+    """PAC ``timeRange``: an hour, or a range of hours, of hour:minute or of
+    hour:minute:second, optionally followed by ``"GMT"``.
 
-    def in_range(start, end, value):
-        return start <= value <= end if start <= end else (value >= start or value <= end)
-
-    if len(args) == 1:
-        return now.hour == args[0]
-    if len(args) == 2:
-        return in_range(args[0], args[1], now.hour)
-    if len(args) == 4:
-        h1, m1, h2, m2 = args
-        return in_range((h1, m1), (h2, m2), (now.hour, now.minute))
-    if len(args) == 6:
-        h1, m1, s1, h2, m2, s2 = args
-        return in_range((h1, m1, s1), (h2, m2, s2), (now.hour, now.minute, now.second))
-    return False
+    ``timeRange(9, 17)`` is true from 9:00:00 to 17:59:59 and does not wrap
+    (``timeRange(22, 6)`` is never true); ``timeRange(22, 0, 6, 0)`` wraps past
+    midnight and ends at 6:00:59.
+    """
+    values, gmt = _split_gmt(args)
+    numbers = [int(v) for v in values]
+    now = _now(gmt)
+    if len(numbers) == 1:
+        return now.hour == numbers[0]
+    if len(numbers) == 2:
+        return numbers[0] <= now.hour <= numbers[1]
+    if len(numbers) == 4:
+        start, end = (numbers[0], numbers[1], 0), (numbers[2], numbers[3], 59)
+    elif len(numbers) == 6:
+        start, end = tuple(numbers[:3]), tuple(numbers[3:])
+    else:
+        return False
+    moment = (now.hour, now.minute, now.second)
+    return start <= moment <= end if start <= end else (moment >= start or moment <= end)
 
 
 def isPlainHostName(host: str) -> bool:

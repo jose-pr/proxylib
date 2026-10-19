@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Tuple, Union
 from urllib.parse import urlsplit, urlunsplit
 
+from ..exceptions import PACError
 from ..proxy import Proxy
 from .script import PacScript
 
@@ -20,7 +21,8 @@ class PacProxyMap:
     signature, which takes the place of subclassing. ``host`` is the URL's
     host, lower-cased. The result string is read with
     :meth:`Proxy.parse_pac_result`; a PAC always answers, so this map never
-    raises ``KeyError``.
+    raises ``KeyError``: whatever a Python function raises becomes
+    :class:`~proxylib.PACError`, as a script error does.
 
     ``browser_compatibility=True`` passes an ``https`` URL without its path and
     query, as Chrome and Firefox do so a PAC server cannot see them.
@@ -51,7 +53,10 @@ class PacProxyMap:
         if isinstance(self.script, PacScript):
             result = self.script.find_proxy_for_url(url, host)
         else:
-            result = self.script(url, host)
+            try:
+                result = self.script(url, host)
+            except Exception as exc:
+                raise PACError(f"FindProxyForURL raised {exc!r}") from exc
         if not isinstance(result, str):
             return (None,)
         return Proxy.parse_pac_result(result)
