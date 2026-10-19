@@ -11,7 +11,10 @@ NO_PROXY) need.
 
 from __future__ import annotations
 
-import urllib.request
+# The alias form reads sys.modules, so this module imports even while
+# urllib.request is still being bound on its package (proxylib imported from
+# a post-import hook of urllib.request).
+import urllib.request as urllib_request
 from typing import Any
 
 from ..proxy import ProxyMap, lookup
@@ -19,7 +22,7 @@ from ..proxy import ProxyMap, lookup
 __all__ = ("ProxyMapHandler",)
 
 
-class ProxyMapHandler(urllib.request.ProxyHandler):
+class ProxyMapHandler(urllib_request.ProxyHandler):
     """A ``urllib.request`` handler that resolves proxies per-request from a ``ProxyMap``::
 
         opener = urllib.request.build_opener(ProxyMapHandler(proxymap))
@@ -27,6 +30,10 @@ class ProxyMapHandler(urllib.request.ProxyHandler):
 
         # or, to affect every urllib.request.urlopen() call:
         urllib.request.install_opener(opener)
+
+    When the map has no opinion (``KeyError``), the request uses the proxy
+    ``urllib.request.getproxies()`` names for its scheme, as the standard
+    ``ProxyHandler`` would.
     """
 
     def __init__(self, proxymap: ProxyMap) -> None:
@@ -40,7 +47,10 @@ class ProxyMapHandler(urllib.request.ProxyHandler):
         try:
             proxy = lookup(self.proxymap, req.full_url)[0]
         except KeyError:
-            proxy = None
+            # No opinion: urllib's own choice, from the environment (and, on
+            # Windows and macOS, the system settings urllib reads).
+            fallback = urllib_request.getproxies().get(req.type)
+            return self.proxy_open(req, fallback, req.type) if fallback else None
         if proxy is None:
             return None  # DIRECT: fall through to the default (non-proxying) handler.
         return self.proxy_open(req, proxy.uri(), req.type)

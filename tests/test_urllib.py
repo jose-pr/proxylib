@@ -14,6 +14,23 @@ def test_proxymaphandler_injects_resolved_proxy():
     assert req.host == "proxy.example.com:8080"
 
 
+def test_proxymaphandler_no_opinion_uses_urllibs_own_proxies(monkeypatch):
+    class NoOpinion:
+        def __getitem__(self, url):
+            raise KeyError(url)
+
+    handler = ProxyMapHandler(NoOpinion())
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {"http": "http://env.example:3128"})
+    req = urllib.request.Request("http://example.com/foo")
+    assert handler.http_open(req) is None
+    assert req.host == "env.example:3128"
+
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
+    req = urllib.request.Request("http://example.com/foo")
+    assert handler.http_open(req) is None
+    assert req.host == "example.com"
+
+
 def test_proxymaphandler_direct_leaves_request_untouched():
     handler = ProxyMapHandler(SimpleProxyMap("DIRECT"))
 

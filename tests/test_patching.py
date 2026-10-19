@@ -1,173 +1,247 @@
+"""patch() handles, the active map, register_patcher, the built-in requests and
+urllib targets, and PROXYLIB_AUTO_PATCH in fresh interpreters."""
+
+import importlib.metadata
+import os
+import pathlib
+import subprocess
+import sys
+import textwrap
 import urllib.request
 
 import pytest
 
-import proxylib.patching as patching
-from proxylib import Proxy, SimpleProxyMap, patch, register_patcher, unpatch
+from proxylib import MissingExtraError, Patch, SimpleProxyMap, patch, register_patcher, unpatch
+from proxylib import patching
+
+_SRC = str(pathlib.Path(__file__).resolve().parents[1] / "src")
+A = SimpleProxyMap("PROXY a:1")
+B = SimpleProxyMap("PROXY b:1")
 
 
 @pytest.fixture(autouse=True)
-def clean_patch_state():
-    # register_patcher() mutates the shared module-level registry -- save
-    # and restore it (not just unpatch()) so a test's fake registrations
-    # (e.g. "fake", "target-a") don't leak into later tests' default
-    # (targets=None -> "every registered target") behavior.
+def clean_patching():
+    registry = dict(patching._registry)
+    hooked = set(patching._hooked)
     unpatch()
-    original_registry = dict(patching._registry)
     yield
     unpatch()
+    for name in set(patching._registry) - set(registry):
+        if name in patching._installed:
+            patching._registry[name].uninstall()
+            patching._installed.discard(name)
     patching._registry.clear()
-    patching._registry.update(original_registry)
+    patching._registry.update(registry)
+    patching._hooked.clear()
+    patching._hooked.update(hooked)
 
 
-@pytest.fixture
-def fake_target():
-    calls = {"patch": [], "unpatch": 0}
+def _host(target):
+    return patching._ActiveMap(target)["http://x/"][0].host
 
-    def patch_func(proxymap):
-        calls["patch"].append(proxymap)
 
-    def unpatch_func():
-        calls["unpatch"] += 1
+def _run(code, **env):
+    environ = {k: v for k, v in os.environ.items() if not k.startswith("PROXYLIB_")}
+    environ.update(PYTHONPATH=_SRC, **env)
+    return subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)], capture_output=True, text=True, timeout=60, env=environ
+    )
 
-    register_patcher("fake", patch_func, unpatch_func)
+
+# ---- the patch stack -------------------------------------------------------------
+
+
+def test_with_no_patch_the_default_map_has_no_opinion():
+    with pytest.raises(KeyError):
+        patching._ActiveMap("requests")["http://x/"]
+
+
+def test_patches_nest_and_restore_the_previous_map():
+    with patch(A) as outer:
+        assert isinstance(outer, Patch) and outer.active
+        with patch(B):
+            assert _host("requests") == "b"
+        assert _host("requests") == "a"
+    assert not outer.active
+    with pytest.raises(KeyError):
+        patching._ActiveMap("requests")["http://x/"]
+
+
+def test_a_patch_can_cover_some_targets_only():
+    with patch(A), patch(B, targets=["urllib"]):
+        assert _host("urllib") == "b"
+        assert _host("requests") == "a"
+
+
+def test_patches_are_undone_newest_first():
+    first = patch(A)
+    second = patch(B)
+    with pytest.raises(RuntimeError):
+        first.undo()
+    second.undo()
+    second.undo()  # already ended: nothing happens
+    first.undo()
+    assert patching._frames == []
+
+
+def test_unpatch_ends_every_patch():
+    first, second = patch(A), patch(B)
+    unpatch()
+    assert not first.active and not second.active
+
+
+def test_an_unknown_target_is_an_error():
+    with pytest.raises(ValueError, match="nope"):
+        patch(A, targets=["nope"])
+
+
+# ---- register_patcher ------------------------------------------------------------
+
+
+def _client(tmp_path, monkeypatch, name):
+    (tmp_path / f"{name}.py").write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, name, raising=False)
+    calls = []
+    register_patcher(name, calls.append, lambda: calls.append("uninstalled"), module=name)
     return calls
 
 
-def test_patch_calls_registered_patch_func(fake_target):
-    proxymap = SimpleProxyMap("DIRECT")
-    patch(proxymap, targets=["fake"])
-
-    assert fake_target["patch"] == [proxymap]
-
-
-def test_unpatch_calls_registered_unpatch_func(fake_target):
-    patch(SimpleProxyMap("DIRECT"), targets=["fake"])
-    unpatch()
-
-    assert fake_target["unpatch"] == 1
-
-
-def test_unpatch_is_idempotent(fake_target):
-    unpatch()
-    unpatch()
-
-    assert fake_target["unpatch"] == 0
+def test_a_registered_client_is_installed_once_when_imported(tmp_path, monkeypatch):
+    calls = _client(tmp_path, monkeypatch, "ip_client_a")
+    assert calls == []
+    importlib_module = __import__("ip_client_a")
+    assert importlib_module.VALUE == 1
+    assert len(calls) == 1
+    installed_map = calls[0]
+    with patch(A, targets=["ip_client_a"]):
+        assert installed_map["http://x/"][0].host == "a"
+    patch(B)
+    assert installed_map["http://x/"][0].host == "b"
+    assert len(calls) == 1
 
 
-def test_patch_only_applies_requested_targets():
-    calls = {"a": 0, "b": 0}
-    register_patcher("target-a", lambda pm: calls.__setitem__("a", calls["a"] + 1), lambda: None)
-    register_patcher("target-b", lambda pm: calls.__setitem__("b", calls["b"] + 1), lambda: None)
-
-    patch(SimpleProxyMap("DIRECT"), targets=["target-a"])
-
-    assert calls == {"a": 1, "b": 0}
-
-
-def test_patch_unknown_target_raises_keyerror():
-    with pytest.raises(KeyError):
-        patch(SimpleProxyMap("DIRECT"), targets=["does-not-exist"])
+def test_registering_a_name_twice_needs_replace(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch, "ip_client_b")
+    with pytest.raises(ValueError, match="already registered"):
+        register_patcher("ip_client_b", print, print, module="ip_client_b")
+    register_patcher("ip_client_b", print, print, module="ip_client_b", replace=True)
+    with pytest.raises(ValueError):
+        register_patcher("requests", print, print, module="requests")
+    assert {"requests", "urllib", "ip_client_b"} <= set(patching.targets())
 
 
-def test_patch_partial_failure_rolls_back_already_applied_targets():
-    applied = []
-    register_patcher("ok", lambda pm: applied.append("ok"), lambda: applied.remove("ok"))
-
-    with pytest.raises(KeyError):
-        patch(SimpleProxyMap("DIRECT"), targets=["ok", "does-not-exist"])
-
-    # "ok" was applied then rolled back when "does-not-exist" failed.
-    assert applied == []
+def test_naming_a_client_that_is_not_installed_raises(monkeypatch):
+    register_patcher("ip_missing", print, print, module="ip_missing_client.sub")
+    with pytest.raises(MissingExtraError) as info:
+        patch(A, targets=["ip_missing"])
+    assert info.value.name == "ip_missing_client"
+    patch(A)  # unnamed: skipped
 
 
-def test_patch_again_while_active_warns_and_replaces(fake_target):
-    first = SimpleProxyMap("DIRECT")
-    second = SimpleProxyMap(Proxy.parse("http://p:80"))
-    patch(first, targets=["fake"])
-
-    with pytest.warns(UserWarning, match="already patched"):
-        patch(second, targets=["fake"])
-
-    assert fake_target["patch"] == [first, second]
-    assert fake_target["unpatch"] == 1  # first patch's undo ran before the second applied
-
-
-def test_unpatch_runs_in_reverse_order():
-    order = []
-    register_patcher("first", lambda pm: order.append("patch-first"), lambda: order.append("unpatch-first"))
-    register_patcher("second", lambda pm: order.append("patch-second"), lambda: order.append("unpatch-second"))
-
-    patch(SimpleProxyMap("DIRECT"), targets=["first", "second"])
-    order.clear()
-    unpatch()
-
-    assert order == ["unpatch-second", "unpatch-first"]
-
-
-# ---- built-in "requests" target -------------------------------------------------
+# ---- the built-in targets in this process -------------------------------------------
 
 requests = pytest.importorskip("requests")
 
 
-def test_requests_target_mounts_adapter_on_new_sessions():
+def test_new_requests_sessions_use_the_active_map():
     from proxylib.integrations.requests import ProxyMapAdapter
-
-    proxymap = SimpleProxyMap(Proxy.parse("http://p:80"))
-    patch(proxymap, targets=["requests"])
 
     session = requests.Session()
     try:
-        assert isinstance(session.get_adapter("http://example.com"), ProxyMapAdapter)
-        assert isinstance(session.get_adapter("https://example.com"), ProxyMapAdapter)
+        adapter = session.get_adapter("https://example.com/")
+        assert isinstance(adapter, ProxyMapAdapter)
+        with pytest.raises(KeyError):
+            adapter.proxymap["https://example.com/"]
+        with patch(A):
+            assert adapter.proxymap["https://example.com/"][0].host == "a"
     finally:
         session.close()
 
 
-def test_requests_target_does_not_affect_pre_existing_sessions():
-    from proxylib.integrations.requests import ProxyMapAdapter
-
-    pre_existing = requests.Session()
+def test_a_requests_session_without_a_patch_keeps_its_own_proxies(monkeypatch):
+    session = requests.Session()
     try:
-        patch(SimpleProxyMap("DIRECT"), targets=["requests"])
-        assert not isinstance(pre_existing.get_adapter("http://example.com"), ProxyMapAdapter)
+        adapter = session.get_adapter("http://example.com/")
+        sent = {}
+
+        def send(self, request, **kwargs):
+            sent.update(kwargs["proxies"])
+
+        monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+        adapter.send(requests.Request("GET", "http://example.com/").prepare(), proxies={"http": "http://env:1"})
+        assert sent == {"http": "http://env:1"}
     finally:
-        pre_existing.close()
+        session.close()
 
 
-def test_requests_target_unpatch_restores_default_init():
-    original_init = requests.Session.__init__
-    patch(SimpleProxyMap("DIRECT"), targets=["requests"])
-    assert requests.Session.__init__ is not original_init
-
-    unpatch()
-    assert requests.Session.__init__ is original_init
-
-
-# ---- built-in "urllib" target --------------------------------------------------
-
-
-def test_urllib_target_installs_global_opener():
+def test_urllib_gets_the_handler_when_no_opener_was_installed():
     from proxylib.integrations.urllib import ProxyMapHandler
 
-    patch(SimpleProxyMap("DIRECT"), targets=["urllib"])
-
-    opener = urllib.request._opener
-    assert any(isinstance(h, ProxyMapHandler) for h in opener.handlers)
+    assert any(isinstance(h, ProxyMapHandler) for h in urllib.request._opener.handlers)
 
 
-def test_urllib_target_unpatch_restores_prior_opener():
-    prior = urllib.request._opener
-    patch(SimpleProxyMap("DIRECT"), targets=["urllib"])
-    unpatch()
+# ---- fresh interpreters -----------------------------------------------------------
 
-    assert urllib.request._opener is prior
+ADAPTER = "type(requests.Session().get_adapter('http://x/')).__name__"
 
 
-# ---- ProxyMap context manager --------------------------------------------------
+@pytest.mark.parametrize("importpatch_disable", ["1", "0"], ids=["own-hook", "importpatch"])
+def test_clients_are_patched_whether_imported_before_or_after_proxylib(importpatch_disable):
+    code = "import {}, {}; import urllib.request as u; print({}, u._opener is not None)"
+    for first, second in (("proxylib", "requests"), ("requests", "proxylib")):
+        result = _run(code.format(first, second, ADAPTER), IMPORTPATCH_DISABLE=importpatch_disable)
+        assert (result.returncode, result.stdout.split(), result.stderr) == (0, ["ProxyMapAdapter", "True"], "")
 
 
-def test_a_proxymap_is_not_a_context_manager():
-    # Patching is done by patch(), never as a side effect of using a map.
-    proxymap = SimpleProxyMap("DIRECT")
-    assert not hasattr(proxymap, "__enter__")
+def test_auto_patch_off_installs_nothing_until_patch_is_called():
+    result = _run(
+        f"""
+        import urllib.request, proxylib, requests
+        print({ADAPTER}, urllib.request._opener)
+        proxylib.patch(proxylib.SimpleProxyMap("DIRECT"))
+        print({ADAPTER})
+        """,
+        PROXYLIB_AUTO_PATCH="0",
+    )
+    assert result.stdout.split() == ["HTTPAdapter", "None", "ProxyMapAdapter"], result.stderr
+
+
+def test_auto_patch_on_uses_auto_proxy():
+    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_AUTO_PATCH="1")
+    assert result.stdout.strip() == "<auto_proxy()>", result.stderr
+
+
+def test_a_bad_auto_patch_value_warns_and_keeps_the_default():
+    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_AUTO_PATCH="maybe")
+    assert result.stdout.strip() == "<no proxylib opinion>"
+    assert "PROXYLIB_AUTO_PATCH" in result.stderr
+
+
+def test_a_program_opener_is_left_alone():
+    result = _run(
+        """
+        import urllib.request
+        mine = urllib.request.build_opener()
+        urllib.request.install_opener(mine)
+        import proxylib
+        print(urllib.request._opener is mine)
+        """
+    )
+    assert result.stdout.strip() == "True", result.stderr
+
+
+def _entry_points_installed():
+    try:
+        importlib.metadata.version("importpatch")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    eps = importlib.metadata.entry_points()
+    group = eps.select(group="importpatch") if hasattr(eps, "select") else eps.get("importpatch", ())
+    return any(ep.value.startswith("proxylib.") for ep in group)
+
+
+@pytest.mark.skipif(not _entry_points_installed(), reason="needs proxylib installed with the patch extra")
+def test_the_patch_extra_patches_programs_that_never_import_proxylib():
+    result = _run(f"import requests, sys; print({ADAPTER}, 'proxylib' in sys.modules)")
+    assert result.stdout.split() == ["ProxyMapAdapter", "True"], result.stderr

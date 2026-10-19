@@ -18,11 +18,11 @@ from .pac import PacScript as PacScript
 from .pac import load as load_pac
 from .pac import loads as loads_pac
 from .pac.wpad import discover as discover_pac
+from .patching import Patch as Patch
 from .patching import patch as patch
 from .patching import register_patcher as register_patcher
 from .patching import unpatch as unpatch
 from .proxy import ChainProxyMap as ChainProxyMap
-from .proxy import ConfigurableProxyMap as ConfigurableProxyMap
 from .proxy import Proxy as Proxy
 from .proxy import ProxyMap as ProxyMap
 from .proxy import SimpleProxyMap as SimpleProxyMap
@@ -33,17 +33,22 @@ from .system import ProxyConfig as ProxyConfig
 from .system import auto_proxy as auto_proxy
 from .system import system_config as system_config
 from .wrappers import Bypass as Bypass
+from .wrappers import Cached as Cached
+from .wrappers import Probed as Probed
+from .wrappers import RoundRobin as RoundRobin
+from .wrappers import configure as configure
 
 __all__ = (
     "Bypass",
     "BypassRules",
     "ChainProxyMap",
-    "ConfigurableProxyMap",
+    "Cached",
     "EnvProxyConfig",
     "MissingExtraError",
     "NoReachableProxyError",
     "PacProxyMap",
     "PacScript",
+    "Patch",
     "PACError",
     "Proxy",
     "ProxyAnswer",
@@ -55,9 +60,12 @@ __all__ = (
     "ProxyMapHandler",
     "ProxyParseError",
     "ProxylibError",
+    "Probed",
+    "RoundRobin",
     "SimpleProxyMap",
     "auto_proxy",
     "clear_caches",
+    "configure",
     "discover_pac",
     "load_pac",
     "loads_pac",
@@ -67,6 +75,13 @@ __all__ = (
     "system_config",
     "unpatch",
 )
+
+# requests and urllib already imported get proxylib's integration now (the
+# rest when they are imported; see proxylib.patching).
+from .patching import _install_ready  # noqa: E402
+
+_install_ready()
+del _install_ready
 
 
 def __getattr__(name: str) -> Any:

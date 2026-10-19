@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = ["netimps>=0.4.0,<0.5"]
 [project.optional-dependencies]
-dev = ['build', 'twine', 'hatchling', 'pytest', 'requests', 'httpx']
+dev = ['build', 'twine', 'hatchling', 'pytest', 'requests', 'httpx', 'importpatch>=0.2,<0.3']
 # PAC-as-JS engines (proxylib.pac.engines). "pac" is the preferred engine;
 # "dukpy" is the pure-wheel alternative for platforms quickjs does not build on.
 pac = [
@@ -33,7 +33,15 @@ pac = [
     'quickjs-ng; python_version >= "3.10"',
 ]
 dukpy = ['dukpy']
+# proxylib's requests/urllib integration in every program that imports them,
+# through the entry points below.
+patch = ['importpatch>=0.2,<0.3']
 docs = ['mkdocs', 'mkdocs-material', 'mkdocstrings[python]']
+
+# Read only when importpatch is installed (the "patch" extra).
+[project.entry-points.importpatch]
+requests = "proxylib.integrations.autopatch"
+"urllib.request" = "proxylib.integrations.autopatch"
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/proxylib/"

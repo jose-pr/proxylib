@@ -13,17 +13,13 @@ from __future__ import annotations
 
 import re
 import threading
-import time
 import warnings
-from collections import OrderedDict
 from collections.abc import Iterable as _AbcIterable
 from collections.abc import Mapping
 from typing import Any, Iterable, Optional, Protocol, Tuple, Union, runtime_checkable
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from . import _net
-from ._net import first_working_proxy
-from .bypass import BypassRules
 from .exceptions import ProxyParseError
 
 __all__ = [
@@ -34,7 +30,6 @@ __all__ = [
     "lookup",
     "SimpleProxyMap",
     "ChainProxyMap",
-    "ConfigurableProxyMap",
 ]
 
 # Scheme aliases accepted in proxy URLs and PAC results: "proxy" is the PAC
@@ -410,123 +405,3 @@ class ChainProxyMap(ProxyMap):
             except KeyError:
                 continue
         raise KeyError(url)
-
-
-class ConfigurableProxyMap(ProxyMap):
-    """Decorates any ``ProxyMap`` with caching, active probing, round-robin
-    selection, browser-style privacy stripping, and an implicit local bypass.
-
-    All features are opt-in and independent; the decorated map is read with
-    :func:`lookup`, so its "no opinion" (``KeyError``) passes through.
-
-    The cache holds the decorated map's answer for at most ``cache_maxsize``
-    URLs (least recently used dropped first); round-robin rotation applies to
-    every lookup, cached or not. ``no_proxy`` is :class:`BypassRules` or
-    ``NO_PROXY`` text; ``bypass_local=True`` adds ``<subnet>``.
-    """
-
-    def __init__(
-        self,
-        proxymap: ProxyMap,
-        *,
-        cache_ttl: "Optional[float]" = None,
-        probe: bool = False,
-        probe_timeout: float = 5.0,
-        round_robin: bool = False,
-        browser_compatibility: bool = False,
-        bypass_local: bool = False,
-        no_proxy: "Union[BypassRules, str, Iterable[str], None]" = None,
-        cache_maxsize: int = 1024,
-    ) -> None:
-        self.proxymap = proxymap
-        self.cache_ttl = cache_ttl
-        self.cache_maxsize = cache_maxsize
-        self.probe = probe
-        self.probe_timeout = probe_timeout
-        self.round_robin = round_robin
-        self.browser_compatibility = browser_compatibility
-
-        rules = no_proxy if isinstance(no_proxy, BypassRules) else BypassRules.parse(no_proxy)
-        if bypass_local:
-            rules = rules | BypassRules.parse("<subnet>")
-        # Without any rule there is no bypass step at all, not even the
-        # implicit loopback one: the decorated map decides.
-        self._bypass: "Optional[BypassRules]" = rules if rules else None
-
-        # url -> (monotonic timestamp, decoded answer, probed answer or None);
-        # the probed answer is only kept when round-robin is off, since a
-        # rotated list must be probed in its new order.
-        self._cache: "OrderedDict[str, Tuple[float, tuple, Optional[tuple]]]" = OrderedDict()
-        self._round_robin_index = 0
-        self._lock = threading.Lock()
-
-    def clear_cache(self) -> None:
-        with self._lock:
-            self._cache.clear()
-
-    def _cache_get(self, url: str) -> "Optional[Tuple[float, tuple, Optional[tuple]]]":
-        if not self.cache_ttl:
-            return None
-        with self._lock:
-            cached = self._cache.get(url)
-            if cached is None:
-                return None
-            if time.monotonic() - cached[0] >= self.cache_ttl:
-                del self._cache[url]
-                return None
-            self._cache.move_to_end(url)
-            return cached
-
-    def _cache_put(self, url: str, result: tuple, probed: "Optional[tuple]") -> None:
-        if not self.cache_ttl:
-            return
-        with self._lock:
-            self._cache[url] = (time.monotonic(), result, probed)
-            self._cache.move_to_end(url)
-            while len(self._cache) > max(self.cache_maxsize, 1):
-                self._cache.popitem(last=False)
-
-    def _effective_url(self, url: str) -> str:
-        """Apply browser-style privacy stripping: for HTTPS, strip the
-        path/query/fragment before delegating (matches Chrome 52+/Firefox
-        53+ behavior toward PAC scripts -- HTTPS request details are
-        considered sensitive to leak to a PAC server)."""
-        if not self.browser_compatibility:
-            return url
-        parsed = urlsplit(url)
-        if parsed.scheme != "https":
-            return url
-        return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
-
-    def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
-        if self._bypass is not None and self._bypass.matches(url):
-            return (None,)
-
-        effective_url = self._effective_url(url)
-
-        cached = self._cache_get(effective_url)
-        if cached is not None and cached[2] is not None:
-            return cached[2]
-        result: tuple = cached[1] if cached is not None else lookup(self.proxymap, effective_url)
-
-        answer = result
-        if self.round_robin and len(answer) > 1:
-            with self._lock:
-                index = self._round_robin_index % len(answer)
-                self._round_robin_index += 1
-            answer = answer[index:] + answer[:index]
-
-        probed: "Optional[tuple]" = None
-        if self.probe:
-            try:
-                answer = (first_working_proxy(answer, timeout=self.probe_timeout),)
-            except LookupError:
-                # No candidate was reachable: a failure to answer, not a DIRECT decision.
-                raise KeyError(url)
-            if not self.round_robin:
-                probed = answer
-
-        if cached is None or probed is not None:
-            self._cache_put(effective_url, result, probed)
-
-        return answer

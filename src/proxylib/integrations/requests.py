@@ -10,6 +10,7 @@ simpler proxies-dict style (``requests.get(url, proxies=...)``) use
 
 from __future__ import annotations
 
+from collections import ChainMap
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -32,6 +33,8 @@ def _build_adapter_class() -> type:
 
         class ProxyMapAdapter:  # type: ignore[no-redef]
             """Placeholder: ``requests`` is not installed."""
+
+            _placeholder = True
 
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 raise MissingExtraError("ProxyMapAdapter", name="requests")
@@ -68,31 +71,22 @@ def _build_adapter_class() -> type:
             super().__init__(*args, **kwargs)
 
         def send(self, request: "PreparedRequest", **kwargs: Any):
-            proxies = dict(kwargs.get("proxies") or {})
             try:
                 entries = lookup(self.proxymap, request.url)
             except KeyError:
-                entries = None  # no opinion: leave `proxies` as-is (env/session settings apply)
-
-            if entries is not None:
-                hostname = urlsplit(request.url).hostname
-                if hostname:
-                    scheme = urlsplit(request.url).scheme
-                    resolved = entries[0]
-                    # The most-specific key select_proxy() checks (scheme://
-                    # hostname, ahead of a bare scheme/"all") -- this is what
-                    # actually outranks requests' own env-proxy injection
-                    # (Session.merge_environment_settings runs before this
-                    # adapter's send(), via `proxies.setdefault(scheme, ...)`
-                    # at the *scheme* level only, so it can never pre-occupy
-                    # this more specific key). `None` here means DIRECT:
-                    # select_proxy()'s `if proxy:` check treats it the same
-                    # as "not configured".
-                    proxies.setdefault(
-                        f"{scheme}://{hostname}",
-                        resolved.uri() if resolved is not None else None,
-                    )
-            kwargs["proxies"] = proxies
+                # No opinion: requests decides from `proxies` (the session's,
+                # the call's and the environment's), untouched.
+                return super().send(request, **kwargs)
+            parts = urlsplit(request.url)
+            if parts.hostname:
+                resolved = entries[0]
+                # scheme://hostname is the most specific key select_proxy()
+                # reads, so it outranks the scheme-level keys requests adds
+                # from the environment; a caller's own entry for that key
+                # still wins. None means DIRECT. The caller's proxies may be
+                # any mapping (a ProxyDict), so they are layered, not copied.
+                ours = {f"{parts.scheme}://{parts.hostname}": resolved.uri() if resolved is not None else None}
+                kwargs["proxies"] = ChainMap(kwargs.get("proxies") or {}, ours)
             return super().send(request, **kwargs)
 
     return ProxyMapAdapter
@@ -101,6 +95,9 @@ def _build_adapter_class() -> type:
 def __getattr__(name: str) -> Any:
     if name == "ProxyMapAdapter":
         cls = _build_adapter_class()
-        globals()["ProxyMapAdapter"] = cls
+        # Only the real class is kept: requests may be importable later (it
+        # can be mid-import now).
+        if not getattr(cls, "_placeholder", False):
+            globals()["ProxyMapAdapter"] = cls
         return cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
