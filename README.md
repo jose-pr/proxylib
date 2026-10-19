@@ -45,10 +45,13 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
 - **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup, stopping before a
   public suffix such as `co.uk`. Results (including "no WPAD server here") are cached for 5 minutes so repeated
   lookups don't re-probe the network, and DNS resolution fails fast on a hanging lookup.
-- **`requests` integration** — a `ProxyMapAdapter` Transport Adapter that resolves the
-  proxy from the real request URL (not just scheme+host).
-- **`urllib.request` integration** — `ProxyMapHandler`, the same idea as
-  `ProxyMapAdapter` but for the standard library's opener/handler system.
+- **Clients with failover** — `requests` (`ProxyMapAdapter`), `httpx`
+  (`ProxyTransport`, `AsyncProxyTransport`) and `urllib` (`ProxyMapHandler`) resolve the
+  proxy from the real request URL. A `PROXY a; PROXY b; DIRECT` answer is a failover
+  list: a proxy that refuses or times out connecting is skipped for 5 minutes and the
+  next entry is tried (urllib uses the healthiest entry).
+- **asyncio** — `await alookup(proxymap, url)` reads any map without blocking the event
+  loop.
 - **Patched clients that behave as before** — importing proxylib gives `requests` and
   `urllib` its adapter and handler, which choose exactly the proxy they always did until
   you call `proxylib.patch(proxymap)` (nestable: `with proxylib.patch(m): ...`). Set
@@ -70,6 +73,8 @@ Optional extras:
 | --- | --- | --- |
 | `proxylib[pac]` | `quickjs-ng` (Python ≥3.10) / `quickjs` (Python 3.9) | Executing PAC files as JavaScript (preferred engine) |
 | `proxylib[dukpy]` | `dukpy` | The `dukpy` JS engine, for platforms without a quickjs wheel (Windows ARM64) |
+| `proxylib[httpx]` | `httpx` | `ProxyTransport` / `AsyncProxyTransport` |
+| `proxylib[patch]` | `importpatch` | Patching `requests`/`urllib` in programs that never import proxylib |
 
 Without a JS engine installed, loading a PAC raises `MissingExtraError` naming the
 extra to install; pass `on_missing_engine="direct"` to get a warning and DIRECT
@@ -124,6 +129,19 @@ urllib.request.install_opener(opener)
 `ProxyMapHandler` subclasses `urllib.request.ProxyHandler` but resolves per-request
 from the `ProxyMap` instead of a static `{scheme: proxy_url}` dict, for the same reason
 `ProxyMapAdapter` exists for `requests`.
+
+### With `httpx`
+
+```python
+import httpx
+from proxylib import auto_proxy
+from proxylib.integrations.httpx import ProxyTransport
+
+with httpx.Client(transport=ProxyTransport(auto_proxy())) as client:
+    client.get("https://example.com")
+```
+
+`AsyncProxyTransport` does the same for `httpx.AsyncClient`.
 
 ### ...or patch `requests` and `urllib` everywhere
 
@@ -214,6 +232,7 @@ lookup(proxymap, "https://example.com/")  # -> (Proxy(scheme='http', host='corp-
 | `proxylib.pac.engines` | `JSEngine` interface, `names()`, engine selection |
 | `proxylib.integrations.requests` | `ProxyMapAdapter` — the recommended `requests` integration |
 | `proxylib.integrations.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
+| `proxylib.integrations.httpx` | `ProxyTransport`, `AsyncProxyTransport` — httpx transports with failover |
 | `proxylib.integrations.dict` | `ProxyDict` — the plain proxies-dict integration |
 | `proxylib.exceptions` | `ProxylibError` and its subclasses (re-exported at top level) |
 
@@ -276,11 +295,10 @@ published to GitHub Pages on every release (see above). To preview locally:
   expected format. `nmcli`, when available, is preferred and doesn't have this caveat.
 - `dateRange`/`timeRange` implement the documented PAC overload shapes but haven't been
   exhaustively verified against every real-world PAC file's edge cases.
-- **No automatic proxy failover in the adapters themselves** — `ProxyMapAdapter`/
-  `ProxyMapHandler` use the first proxy a `ProxyMap` returns; they don't retry the rest
-  of a `PROXY a; PROXY b; DIRECT` chain on connection failure. Wrap your map with
-  `Probed(proxymap)` (active reachability probing, with a circuit breaker for proxies
-  that keep failing) to pre-select a reachable entry.
+- **urllib does not fail over** — `ProxyMapHandler` uses the healthiest entry of an
+  answer but cannot re-send a request through the next one; use `Probed(proxymap)` to
+  pre-select a reachable entry, or requests/httpx for request-time failover. Failover
+  happens only for errors before the request is sent; a read or write error is raised.
 
 ## License
 

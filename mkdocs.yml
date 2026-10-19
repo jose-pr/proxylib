@@ -28,7 +28,7 @@ nav:
       - Core (Proxy, ProxyMap, EnvProxyConfig): api/core.md
       - System settings: api/system.md
       - PAC support: api/pac.md
-      - requests / urllib integrations: api/integrations.md
+      - Client integrations: api/integrations.md
       - Patching registry: api/patching.md
   - Changelog: changelog.md
 

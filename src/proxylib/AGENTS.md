@@ -54,6 +54,9 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
   uses, most specific first: `scheme://host`, `scheme`, `all://host`, `all`. Raises
   `KeyError` for no opinion, `TypeError` for an answer that names no proxy,
   `ProxyParseError` for malformed proxy text.
+- **`async alookup(proxymap, url) -> tuple[Proxy | None, ...]`** — `lookup` run in a
+  worker thread (`asyncio.to_thread`), for asyncio code; same answer and errors. Safe
+  to call from many tasks at once on one map.
 - **`SimpleProxyMap(proxy=None)`** — the same answer for every URL; takes anything
   `lookup` reads. `.proxies` is the parsed tuple.
 - **`ChainProxyMap(*maps)`** — asks each map in order through `lookup`; the first
@@ -286,19 +289,43 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
   removes it. An existing `name` raises `ValueError` unless `replace=True`.
   **`targets()`** lists the names.
 
-## `requests`/`urllib` integrations (`proxylib.integrations`)
+## Client integrations (`proxylib.integrations`)
 
-- **`ProxyMapAdapter(proxymap, *args, **kwargs)`** (`.requests`; looking the name up
-  imports `requests`, and constructing it without `requests` raises
-  `MissingExtraError`) — a `requests.adapters.HTTPAdapter` subclass; hooks `send()` so it
-  sees the real request URL (scheme, host, and path). An explicit `proxies=` entry at
-  the same `scheme://hostname` key still wins (matches `requests.utils.select_proxy`
-  precedence); a less-specific key (bare `"http"`, or env-injected) does not.
+- **Failover and health** (requests and httpx): an answer is a list tried in order,
+  healthy entries first. An entry that fails **before the request is sent** (the proxy,
+  or for DIRECT the server, refuses or times out connecting) is marked bad for
+  `bad_proxy_ttl` seconds (default 300) and the next is tried; the last error is raised.
+  A read or write error never fails over (the server may have the request). Marks are
+  process-wide, shared with `Probed`, and dropped by `clear_caches()`.
+- **`ProxyMapAdapter(proxymap, *args, failover=True, bad_proxy_ttl=300.0, **kwargs)`**
+  (`.requests`; looking the name up imports `requests`, and constructing it without
+  `requests` raises `MissingExtraError`) — a `requests.adapters.HTTPAdapter` subclass;
+  hooks `send()` so it sees the real request URL (scheme, host, and path). An explicit
+  `proxies=` entry at the same `scheme://hostname` key still wins (matches
+  `requests.utils.select_proxy` precedence); a less-specific key (bare `"http"`, or
+  env-injected) does not. When the map has no opinion, requests decides from its
+  `proxies` as usual — but a proxylib value found there (a PAC result such as `"PROXY
+  a:1; DIRECT"`, a list of proxies, a `Proxy`, or a `ProxyDict` as the whole `proxies`)
+  is resolved and failed over; a plain proxy URL stays requests' own. Errors from
+  `failover=False` are requests' (`ProxyError`, `ConnectionError`, ...).
 - **`ProxyMapHandler(proxymap)`** (`.urllib`) — a `urllib.request.ProxyHandler`
   subclass; resolves per-request from `proxymap` instead of a static dict.
-  `http_open`/`https_open`/`ftp_open` all bind the same resolver. Returning DIRECT
-  falls through to the default (non-proxying) handler; no opinion (`KeyError`) uses the
-  proxy `urllib.request.getproxies()` names for the scheme, as the standard handler would.
+  `http_open`/`https_open`/`ftp_open` all bind the same resolver. It uses the healthiest
+  entry and does not fail over (urllib cannot re-send a request through another proxy).
+  Returning DIRECT falls through to the default (non-proxying) handler; no opinion
+  (`KeyError`) uses the proxy `urllib.request.getproxies()` names for the scheme, as the
+  standard handler would.
+- **`ProxyTransport(proxymap, *, failover=True, bad_proxy_ttl=300.0,
+  **transport_kwargs)`** and **`AsyncProxyTransport(...)`** (`.httpx`, the `httpx` extra;
+  constructing one without httpx raises `MissingExtraError(extra="httpx")`) — httpx
+  transports: `httpx.Client(transport=ProxyTransport(m))`,
+  `httpx.AsyncClient(transport=AsyncProxyTransport(m))` (which reads the map with
+  `alookup`). One inner `httpx.HTTPTransport` / `AsyncHTTPTransport` per proxy URL,
+  made on first use with `transport_kwargs`, closed by `close()` / `aclose()` (the
+  client does this). Fails over on `httpx.ProxyError`, `ConnectError`, `ConnectTimeout`.
+  A map with no opinion means DIRECT (httpx skips its environment proxies when given a
+  transport): chain `EnvProxyConfig()` in front to honour them. SOCKS needs
+  `httpx[socks]`. httpx has no global hook, so there is no httpx patch target.
 - **`ProxyDict(proxymap)`** (`.dict`) — duck-types the plain `{scheme_or_url:
   "proxy://uri"}` dict `requests`-like libraries accept. **Composes**, doesn't subclass,
   `ProxyMap` (`__getitem__` returns `str`, an LSP violation if it were a `ProxyMap`
@@ -338,4 +365,5 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 - **Dependencies** — one required: `netimps>=0.4.0,<0.5` (network helpers, no
   dependencies of its own). `import proxylib` imports neither it nor any optional
   client library; each is imported when first used. Extras: `pac` (quickjs), `dukpy`,
-  `patch` (importpatch: patch clients in every program, see Patching clients).
+  `httpx` (the httpx transports), `patch` (importpatch: patch clients in every program,
+  see Patching clients).

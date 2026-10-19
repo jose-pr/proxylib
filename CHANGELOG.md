@@ -59,6 +59,18 @@ Work toward 2.0, which breaks the 1.x API.
 - The `patch` extra (`importpatch`) installs that integration whenever `requests` or
   `urllib.request` is imported, in any program of the environment, through the
   `importpatch` entry point `proxylib.integrations.autopatch`.
+- Failover: `ProxyMapAdapter(proxymap, failover=True, bad_proxy_ttl=300.0)` tries an
+  answer's entries in order, healthy ones first; an entry that fails before the request
+  is sent (refused or timed-out connection) is skipped for `bad_proxy_ttl` seconds and
+  the next is tried. A read or write error is never retried. `ProxyMapHandler` uses the
+  healthiest entry. The bad-proxy marks are shared with `Probed`.
+- A proxylib value in requests' `proxies` — a PAC result such as `"PROXY a:1; DIRECT"`,
+  a list of proxies, or a `ProxyDict` — is resolved and failed over by the adapter (which
+  importing proxylib installs); a plain proxy URL stays requests' own.
+- `proxylib.integrations.httpx`: `ProxyTransport` and `AsyncProxyTransport` for
+  `httpx.Client(transport=...)` / `httpx.AsyncClient(transport=...)`, with the same
+  failover; the `httpx` extra installs httpx.
+- `alookup(proxymap, url)`: `lookup()` for asyncio code, run in a worker thread.
 - The system backends log their decisions at DEBUG on the `proxylib.system` logger.
 
 ### Changed
