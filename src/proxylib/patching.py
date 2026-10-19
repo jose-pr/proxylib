@@ -429,7 +429,14 @@ def _install_aiohttp(proxymap: ProxyMap) -> None:
         async def send(**proxy_kwargs):
             return await original(self, method, str_or_url, **{**kwargs, **proxy_kwargs})
 
-        return await _routed(send, proxymap, str(str_or_url), kwargs.pop("proxy", None))
+        return await _routed(
+            send,
+            proxymap,
+            str(str_or_url),
+            kwargs.pop("proxy", None),
+            proxy_headers=kwargs.pop("proxy_headers", None),
+            headers=kwargs.pop("headers", None),
+        )
 
     _request.__wrapped__ = original  # type: ignore[attr-defined]
     _aiohttp_request = original

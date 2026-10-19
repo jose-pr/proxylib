@@ -11,6 +11,7 @@ from .exceptions import NoReachableProxyError as NoReachableProxyError
 from .exceptions import PACError as PACError
 from .exceptions import ProxylibError as ProxylibError
 from .exceptions import ProxyParseError as ProxyParseError
+from .exceptions import UnsupportedProxyError as UnsupportedProxyError
 from .integrations.dict import ProxyDict as ProxyDict
 from .integrations.urllib import ProxyMapHandler as ProxyMapHandler
 from .pac import PacProxyMap as PacProxyMap
@@ -64,6 +65,7 @@ __all__ = (
     "Probed",
     "RoundRobin",
     "SimpleProxyMap",
+    "UnsupportedProxyError",
     "alookup",
     "auto_proxy",
     "clear_caches",

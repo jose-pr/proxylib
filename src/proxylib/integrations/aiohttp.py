@@ -13,10 +13,14 @@ from __future__ import annotations
 
 import contextvars
 from typing import Any, Awaitable, Callable, Optional, Tuple
+from urllib.parse import urlsplit
 
 from .. import _net
 from ..exceptions import MissingExtraError
 from ..proxy import Proxy, ProxyMap, _is_chain, _normalise, alookup
+from ._support import no_gateway_or_socks, usable
+
+_REASON = no_gateway_or_socks("aiohttp")
 
 __all__ = ("ProxySession",)
 
@@ -42,21 +46,40 @@ def _failover_errors() -> tuple:
     return tuple(errors)
 
 
+def _merged(headers: Any, extra: "Tuple[Tuple[str, str], ...]") -> Any:
+    """``headers`` (any form aiohttp takes) with ``extra`` set over them."""
+    if not extra:
+        return headers
+    from multidict import CIMultiDict
+
+    merged: Any = CIMultiDict(headers or {})
+    for name, value in extra:
+        merged[name] = value
+    return merged
+
+
 async def _routed(
     send: "Callable[..., Awaitable[Any]]",
     proxymap: ProxyMap,
     url: str,
     proxy: Any,
     *,
+    proxy_headers: Any = None,
+    headers: Any = None,
     failover: bool = True,
     bad_proxy_ttl: float = 300.0,
 ) -> Any:
-    """``send(proxy=...)`` with the proxy chosen for ``url``: from ``proxy``
-    when it is a proxylib value, else from ``proxymap``; failing over along
-    the answer. A plain proxy URL, no opinion, or a request already routed
-    is sent with ``proxy`` as given."""
+    """``send(proxy=..., proxy_headers=..., headers=...)`` with the proxy
+    chosen for ``url``: from ``proxy`` when it is a proxylib value, else from
+    ``proxymap``; failing over along the answer, over the entries aiohttp can
+    use. A plain proxy URL, no opinion, or a request already routed is sent
+    with the arguments as given.
+
+    aiohttp sends ``proxy_headers`` in a ``CONNECT`` only, so for a URL it
+    does not tunnel a proxy's headers join the request's own, which goes to
+    that proxy."""
     if _ROUTED.get():
-        return await send(proxy=proxy)
+        return await send(proxy=proxy, proxy_headers=proxy_headers, headers=headers)
     entries: "Optional[Tuple[Optional[Proxy], ...]]"
     if proxy is not None:
         entries = None if isinstance(proxy, str) and not _is_chain(proxy) else _normalise(proxy)
@@ -66,13 +89,21 @@ async def _routed(
         except KeyError:
             entries = None
     if entries is None:
-        return await send(proxy=proxy)
+        return await send(proxy=proxy, proxy_headers=proxy_headers, headers=headers)
+    entries = tuple(usable(entries, "aiohttp", url, _REASON))
+    tunnelled = urlsplit(url).scheme.lower() in ("https", "wss")
     errors = _failover_errors()
     candidates = _net.order_by_health(entries) if failover else list(entries[:1])
     for index, entry in enumerate(candidates):
         token = _ROUTED.set(True)
         try:
-            return await send(proxy=entry.uri() if entry is not None else None)
+            if entry is None:
+                return await send(proxy=None, proxy_headers=proxy_headers, headers=headers)
+            if tunnelled:
+                return await send(
+                    proxy=entry.uri(), proxy_headers=_merged(proxy_headers, entry._headers), headers=headers
+                )
+            return await send(proxy=entry.uri(), proxy_headers=proxy_headers, headers=_merged(headers, entry._headers))
         except errors:
             if not failover:
                 raise
@@ -125,7 +156,11 @@ class ProxySession:
     as ``"PROXY a:1; DIRECT"``, a list of proxies, a ``Proxy``) is resolved
     and failed over instead of the map; a plain proxy URL is aiohttp's own.
 
-    aiohttp speaks HTTP proxies only (no SOCKS), and a session made with
+    A proxy's ``headers`` go to that proxy only: in the ``CONNECT`` of an
+    https request, as headers of a plain-http one (sent to the proxy). aiohttp speaks HTTP
+    proxies only: SOCKS proxies and URL-prefix gateways in an answer are
+    skipped, and an answer with nothing else raises
+    :class:`~proxylib.UnsupportedProxyError`. A session made with
     ``trust_env=True`` uses the environment's proxy for a DIRECT entry, so
     leave that off when the map decides.
     """
@@ -193,10 +228,19 @@ class ProxySession:
 
     async def _request(self, method: str, url: Any, **kwargs: Any) -> Any:
         proxy = kwargs.pop("proxy", None)
+        proxy_headers = kwargs.pop("proxy_headers", None)
+        headers = kwargs.pop("headers", None)
 
         async def send(**proxy_kwargs: Any) -> Any:
             return await self.session.request(method, url, **kwargs, **proxy_kwargs)
 
         return await _routed(
-            send, self.proxymap, str(url), proxy, failover=self.failover, bad_proxy_ttl=self.bad_proxy_ttl
+            send,
+            self.proxymap,
+            str(url),
+            proxy,
+            proxy_headers=proxy_headers,
+            headers=headers,
+            failover=self.failover,
+            bad_proxy_ttl=self.bad_proxy_ttl,
         )

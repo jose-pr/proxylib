@@ -7,7 +7,7 @@ next map", and an error must never be mistaken for that.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Iterable, Optional, Tuple
 
 __all__ = (
     "ProxylibError",
@@ -15,6 +15,7 @@ __all__ = (
     "PACError",
     "NoReachableProxyError",
     "MissingExtraError",
+    "UnsupportedProxyError",
 )
 
 
@@ -49,3 +50,23 @@ class MissingExtraError(ProxylibError, ImportError):
         self.extra = extra
         target = f'"proxylib[{extra}]"' if extra else name
         super().__init__(f"{feature} needs {name}: pip install {target}", name=name)
+
+
+class UnsupportedProxyError(ProxylibError):
+    """A client was offered only proxies it cannot use: a URL-prefix gateway
+    or a SOCKS proxy for a client without them, or a proxy header the client
+    cannot keep from the server. Entries it can use are tried instead when the
+    answer has any.
+
+    ``client`` names the client; ``proxies`` are the entries offered, and
+    ``reasons`` says why each was refused.
+    """
+
+    # refused: (Proxy, reason) pairs; Proxy is not importable here (proxy imports this module).
+    def __init__(self, client: str, refused: "Iterable[Tuple[Any, str]]") -> None:
+        refused = tuple(refused)
+        self.client = client
+        self.proxies = tuple(proxy for proxy, _ in refused)
+        self.reasons = tuple(reason for _, reason in refused)
+        detail = "; ".join(f"{proxy.url} ({reason})" for proxy, reason in refused)
+        super().__init__(f"{client} cannot use any proxy offered: {detail}")

@@ -110,8 +110,12 @@ def resolve_all(host: str, *, timeout: float = 5.0) -> "List[IPAddress]":
 
 
 def default_port(scheme: str) -> "Optional[int]":
-    """The conventional port for a URL or proxy scheme, or ``None``."""
+    """The conventional port for a URL or proxy scheme, or ``None``; a
+    ``prefix+https`` gateway's is that of ``https``."""
     import netimps
+
+    if scheme.startswith("prefix+"):
+        scheme = scheme[len("prefix+"):]
 
     try:
         return netimps.get_default_port(scheme)

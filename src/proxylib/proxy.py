@@ -46,7 +46,13 @@ _PAC_KEYWORDS = {
     "SOCKS4": "socks4",
     "SOCKS5": "socks5",
 }
-_PAC_RESULT = re.compile(r"\s*(DIRECT|PROXY|HTTPS?|SOCKS[45]?)(\s|;|$)", re.IGNORECASE)
+_PAC_RESULT = re.compile(r"\s*(DIRECT|PROXY|HTTPS?|SOCKS[45]?|PREFIX)(\s|;|$)", re.IGNORECASE)
+
+# A URL-prefix gateway: the request goes directly to <gateway URL><target URL>.
+_GATEWAY_PREFIX = "prefix+"
+_GATEWAY_SCHEMES = ("prefix+http", "prefix+https")
+# RFC 9110 token characters, for header names.
+_TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
 
 
 class Proxy:
@@ -55,15 +61,26 @@ class Proxy:
     ``url`` is the address without credentials (what logs and pathapi-style
     consumers read); ``uri()`` adds the credentials, percent-encoded. The
     password never appears in ``repr()`` or ``str()``.
+
+    ``headers`` are sent to this proxy only (a token in ``Proxy-Authorization``,
+    or a header of another name): in the ``CONNECT`` of a tunnel and on a
+    plain-http request to the proxy, never to the server. ``repr()`` shows
+    their names, not their values. A SOCKS proxy takes none.
+
+    The schemes ``prefix+http`` and ``prefix+https`` name a URL-prefix gateway:
+    the request is sent directly to ``<scheme>://host[:port]<path><target URL>``
+    (``path`` defaults to ``/``). Its credentials go as a Basic
+    ``Proxy-Authorization`` header of that request, with ``headers``.
     """
 
-    __slots__ = ("scheme", "host", "port", "username", "password")
+    __slots__ = ("scheme", "host", "port", "username", "password", "path", "_headers")
 
     scheme: str
     host: str
     port: Optional[int]
     username: Optional[str]
     password: Optional[str]
+    path: Optional[str]
 
     def __init__(
         self,
@@ -72,6 +89,9 @@ class Proxy:
         port: Optional[int] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        *,
+        path: Optional[str] = None,
+        headers: "Union[Mapping[str, str], Iterable[Tuple[str, str]], None]" = None,
     ) -> None:
         scheme = (scheme or "").lower()
         scheme = _SCHEME_ALIASES.get(scheme, scheme)
@@ -81,12 +101,32 @@ class Proxy:
             raise ProxyParseError(f"a {scheme} proxy needs a host")
         if port is not None and not (isinstance(port, int) and 0 < port < 65536):
             raise ProxyParseError(f"invalid proxy port {port!r}")
+        if scheme in _GATEWAY_SCHEMES:
+            path = path or "/"
+            if not path.startswith("/") or "?" in path or "#" in path:
+                raise ProxyParseError(f"a gateway path is an absolute path with no query: {path!r}")
+        elif scheme.startswith(_GATEWAY_PREFIX):
+            raise ProxyParseError(f"a gateway is prefix+http or prefix+https, not {scheme}")
+        elif path not in (None, "", "/"):
+            raise ProxyParseError(f"only a prefix+http(s) gateway has a path, not a {scheme} proxy")
+        else:
+            path = None
+        pairs = tuple((headers.items() if isinstance(headers, Mapping) else headers) or ())
+        for name, value in pairs:
+            if not isinstance(name, str) or not _TOKEN.match(name):
+                raise ProxyParseError(f"invalid proxy header name {name!r}")
+            if not isinstance(value, str) or any(c in value for c in "\r\n\0"):
+                raise ProxyParseError(f"invalid value for proxy header {name!r}")
+        if pairs and scheme.startswith("socks"):
+            raise ProxyParseError("a SOCKS proxy takes no headers")
         for name, value in (
             ("scheme", scheme),
             ("host", host.lower()),
             ("port", port),
             ("username", username or None),
             ("password", password or None),
+            ("path", path),
+            ("_headers", pairs),
         ):
             object.__setattr__(self, name, value)
 
@@ -97,7 +137,8 @@ class Proxy:
         raise AttributeError(f"{type(self).__name__} is immutable")
 
     def _key(self) -> tuple:
-        return (self.scheme, self.host, self.port, self.username, self.password)
+        headers = tuple(sorted((name.lower(), value) for name, value in self._headers))
+        return (self.scheme, self.host, self.port, self.username, self.password, self.path, headers)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Proxy):
@@ -115,18 +156,33 @@ class Proxy:
             parts.append(f"username={self.username!r}")
         if self.password is not None:
             parts.append("password='***'")
+        if self.path is not None:
+            parts.append(f"path={self.path!r}")
+        if self._headers:
+            parts.append("headers={%s}" % ", ".join(f"{name!r}: '***'" for name, _ in self._headers))
         return f"Proxy({', '.join(parts)})"
 
     def __str__(self) -> str:
         return self.url
 
     def __reduce__(self) -> tuple:
-        return (type(self), self._key())
+        return (_rebuild, (self.scheme, self.host, self.port, self.username, self.password, self.path, self._headers))
+
+    @property
+    def headers(self) -> "dict":
+        """The headers sent to this proxy only, as a new dict."""
+        return dict(self._headers)
+
+    @property
+    def is_gateway(self) -> bool:
+        """A URL-prefix gateway (``prefix+http``/``prefix+https``), not a proxy."""
+        return self.path is not None
 
     @property
     def url(self) -> str:
-        """``scheme://host[:port]``, no credentials; an IPv6 host is bracketed."""
-        return f"{self.scheme}://{_net.join_host(self.host, self.port)}"
+        """``scheme://host[:port]`` (plus a gateway's path), no credentials; an
+        IPv6 host is bracketed."""
+        return f"{self.scheme}://{_net.join_host(self.host, self.port)}{self.path or ''}"
 
     def uri(self) -> str:
         """``url`` with the credentials, percent-encoded, for a client to connect with."""
@@ -135,13 +191,22 @@ class Proxy:
         userinfo = quote(self.username, safe="")
         if self.password is not None:
             userinfo += ":" + quote(self.password, safe="")
-        return f"{self.scheme}://{userinfo}@{_net.join_host(self.host, self.port)}"
+        return f"{self.scheme}://{userinfo}@{_net.join_host(self.host, self.port)}{self.path or ''}"
+
+    def gateway_url(self, target: str) -> str:
+        """The URL a gateway is asked for to fetch ``target``:
+        ``<scheme>://host[:port]<path><target>``, the target appended as given."""
+        if not self.is_gateway:
+            raise ValueError(f"{self.url} is a proxy, not a URL-prefix gateway")
+        scheme = self.scheme[len(_GATEWAY_PREFIX):]
+        return f"{scheme}://{_net.join_host(self.host, self.port)}{self.path}{target}"
 
     @classmethod
     def parse(cls, text: str) -> "Proxy":
         """Parse a proxy URL (``http://user:pass@host:3128``). A missing scheme
         means ``http``; an IPv6 host is written in brackets. A path other than
-        ``/`` is refused: that is a PAC location, not a proxy."""
+        ``/`` is refused: that is a PAC location, not a proxy -- except on a
+        gateway (``prefix+https://gw.example/fetch/``)."""
         text = text.strip()
         if "://" not in text:
             text = "http://" + text
@@ -150,7 +215,8 @@ class Proxy:
             port = parts.port
         except ValueError as exc:
             raise ProxyParseError(f"invalid proxy URL {text!r}: {exc}") from None
-        if parts.path not in ("", "/") or parts.query or parts.fragment:
+        gateway = parts.scheme.lower().startswith(_GATEWAY_PREFIX)
+        if parts.query or parts.fragment or (parts.path not in ("", "/") and not gateway):
             raise ProxyParseError(f"proxy URL {text!r} has a path; a PAC location is not a proxy")
         if not parts.hostname:
             raise ProxyParseError(f"proxy URL {text!r} has no host")
@@ -160,15 +226,18 @@ class Proxy:
             port,
             unquote(parts.username) if parts.username else None,
             unquote(parts.password) if parts.password else None,
+            path=parts.path if gateway else None,
         )
 
     @classmethod
     def parse_pac_result(cls, text: str) -> "Tuple[Optional[Proxy], ...]":
         """Parse a PAC ``FindProxyForURL`` result (``"PROXY a:1; SOCKS5 b:2; DIRECT"``).
 
-        Keywords are case-insensitive; ``DIRECT`` is ``None``. An entry with an
-        unknown keyword or no usable host is dropped with a warning, and a
-        result with nothing usable left is ``(None,)``, as browsers treat it.
+        Keywords are case-insensitive; ``DIRECT`` is ``None``. ``PREFIX <URL>``
+        (proxylib's own) names a URL-prefix gateway, ``PREFIX
+        https://gw.example/fetch/``. An entry with an unknown keyword or no
+        usable host is dropped with a warning, and a result with nothing usable
+        left is ``(None,)``, as browsers treat it.
         """
         entries: "list[Optional[Proxy]]" = []
         dropped: "list[str]" = []
@@ -181,6 +250,15 @@ class Proxy:
             rest = rest_parts[0] if rest_parts else ""
             if keyword == "DIRECT":
                 entries.append(None)
+                continue
+            if keyword == "PREFIX":
+                target = rest.strip()
+                try:
+                    if not target.lower().startswith(("http://", "https://")):
+                        raise ProxyParseError(target)
+                    entries.append(cls.parse(_GATEWAY_PREFIX + target))
+                except ProxyParseError:
+                    dropped.append(entry)
                 continue
             scheme = _PAC_KEYWORDS.get(keyword)
             host_port = _net.split_host_port(rest.strip()) if scheme and rest.strip() else None
@@ -195,6 +273,11 @@ class Proxy:
             warnings.warn(f"ignoring unusable PAC result entries: {dropped!r}", stacklevel=2)
         return tuple(entries) or (None,)
 
+
+
+def _rebuild(scheme, host, port, username, password, path, headers) -> Proxy:
+    """Unpickle a ``Proxy``; ``path`` and ``headers`` are keyword-only."""
+    return Proxy(scheme, host, port, username, password, path=path, headers=headers)
 
 ProxyLike = Union[Proxy, str, Any]
 """A ``Proxy``, a proxy URL or PAC result string, or any object with a ``url``
@@ -242,7 +325,8 @@ def _parse_text(text: str) -> "Tuple[Optional[Proxy], ...]":
     proxy URL. Empty means DIRECT."""
     if not text.strip():
         return (None,)
-    if "://" not in text and _PAC_RESULT.match(text):
+    # A keyword must be followed by a space, ";" or the end, so no URL matches.
+    if _PAC_RESULT.match(text):
         return Proxy.parse_pac_result(text)
     return (Proxy.parse(text),)
 
@@ -253,7 +337,10 @@ def _with_attribute_credentials(proxy: Proxy, source: Any) -> Proxy:
     username = getattr(source, "username", None)
     if not username:
         return proxy
-    return Proxy(proxy.scheme, proxy.host, proxy.port, username, getattr(source, "password", None))
+    return Proxy(
+        proxy.scheme, proxy.host, proxy.port, username, getattr(source, "password", None),
+        path=proxy.path, headers=proxy._headers,
+    )
 
 
 def _normalise_one(item: Any) -> "Tuple[Optional[Proxy], ...]":
@@ -314,9 +401,14 @@ def lookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]":
 
 
 def _is_chain(value: str) -> bool:
-    """A client's proxy setting that is a PAC result (``"PROXY a:1; DIRECT"``),
-    not a proxy URL; the client integrations resolve and fail over along it."""
-    return ";" in value or _PAC_RESULT.match(value) is not None
+    """A client's proxy setting the client cannot read itself -- a PAC result
+    (``"PROXY a:1; DIRECT"``) or a gateway URL -- so the client integrations
+    resolve it (and fail over along it) in its place."""
+    return (
+        ";" in value
+        or _PAC_RESULT.match(value) is not None
+        or value.strip().lower().startswith(_GATEWAY_PREFIX)
+    )
 
 
 async def alookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]":

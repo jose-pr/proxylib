@@ -8,6 +8,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from ..proxy import ProxyMap, lookup
+from ._support import proxy_url_reason, usable
 
 __all__ = ("ProxyDict",)
 
@@ -25,7 +26,11 @@ class ProxyDict:
     use ``ProxyMapAdapter``/``ProxyMapHandler`` when that fidelity matters.
 
     Lookups return the first proxy's URI string; DIRECT raises ``KeyError``
-    (a missing key means "no proxy", matching the dict convention).
+    (a missing key means "no proxy", matching the dict convention). A URL
+    string cannot name a URL-prefix gateway or carry proxy headers: such
+    entries are skipped, and an answer with nothing else raises
+    :class:`~proxylib.UnsupportedProxyError`. ``ProxyMapAdapter`` resolves a
+    ``ProxyDict`` itself and uses those entries.
 
     Deliberately **composes** a ``ProxyMap`` rather than subclassing it --
     ``__getitem__`` here returns a ``str`` (a proxy URI), not
@@ -45,9 +50,10 @@ class ProxyDict:
         if parts is None or not parts.scheme or not parts.netloc:
             raise KeyError(uri)
         try:
-            proxy = lookup(self.proxymap, uri)[0]
+            entries = lookup(self.proxymap, uri)
         except ValueError:
             raise KeyError(uri) from None
+        proxy = usable(entries, "a proxies dict", uri, proxy_url_reason)[0]
         if proxy is None:
             raise KeyError(uri)
         return proxy.uri()

@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from .. import _net
 from ..exceptions import MissingExtraError
 from ..proxy import Proxy, ProxyMap, alookup, lookup
+from ._support import gateway_headers
 
 __all__ = ("AsyncProxyTransport", "ProxyTransport")
 
@@ -45,21 +46,26 @@ def _build() -> "Dict[str, type]":
     failover_errors = (httpx.ProxyError, httpx.ConnectError, httpx.ConnectTimeout)
 
     class _Transports:
-        """One inner transport per proxy URL (``None`` for DIRECT), made on
-        first use."""
+        """One inner transport per proxy URL and headers (``None`` for
+        DIRECT, which also carries gateway requests), made on first use."""
 
         def __init__(self, factory: Any, kwargs: "Dict[str, Any]") -> None:
             self._factory = factory
             self._kwargs = kwargs
-            self._by_proxy: "Dict[Optional[str], Any]" = {}
+            self._by_proxy: "Dict[Any, Any]" = {}
             self._lock = threading.Lock()
 
         def get(self, proxy: "Optional[Proxy]") -> Any:
-            key = proxy.uri() if proxy is not None else None
+            if proxy is None or proxy.is_gateway:
+                key: Any = None
+                target: Any = None
+            else:
+                key = (proxy.uri(), proxy._headers)
+                target = httpx.Proxy(proxy.uri(), headers=proxy.headers) if proxy._headers else proxy.uri()
             with self._lock:
                 transport = self._by_proxy.get(key)
                 if transport is None:
-                    transport = self._factory(proxy=key, **self._kwargs)
+                    transport = self._factory(proxy=target, **self._kwargs)
                     self._by_proxy[key] = transport
                 return transport
 
@@ -68,6 +74,19 @@ def _build() -> "Dict[str, type]":
                 transports = list(self._by_proxy.values())
                 self._by_proxy.clear()
             return transports
+
+    def outgoing(request: "httpx.Request", entry: "Optional[Proxy]") -> "httpx.Request":
+        """``request``, or for a gateway the request to send it: the gateway
+        URL, a Host header of its own, the gateway's headers, the same body.
+        The client gives the response the original request, so cookies and
+        redirects belong to the target."""
+        if entry is None or not entry.is_gateway:
+            return request
+        url = httpx.URL(entry.gateway_url(str(request.url)))
+        headers = [("Host", url.netloc.decode("ascii"))]
+        headers += [(k, v) for k, v in request.headers.multi_items() if k.lower() != "host"]
+        headers += gateway_headers(entry)
+        return httpx.Request(request.method, url, headers=headers, stream=request.stream, extensions=request.extensions)
 
     class ProxyTransport(httpx.BaseTransport):
         """An httpx transport that asks ``proxymap`` for every request.
@@ -79,6 +98,10 @@ def _build() -> "Dict[str, type]":
         is raised. A map with no opinion means DIRECT: chain an
         :class:`~proxylib.EnvProxyConfig` in front to honour the environment.
         ``transport_kwargs`` go to every inner ``httpx.HTTPTransport``.
+
+        A proxy's ``headers`` go to that proxy only; a URL-prefix gateway gets
+        the request at ``<gateway><URL>``, and the response keeps the original
+        request, so cookies and redirects belong to the target.
         """
 
         def __init__(
@@ -102,7 +125,7 @@ def _build() -> "Dict[str, type]":
             candidates = _net.order_by_health(entries) if self.failover else list(entries[:1])
             for index, entry in enumerate(candidates):
                 try:
-                    return self._transports.get(entry).handle_request(request)
+                    return self._transports.get(entry).handle_request(outgoing(request, entry))
                 except failover_errors:
                     if not self.failover:
                         raise
@@ -140,7 +163,7 @@ def _build() -> "Dict[str, type]":
             candidates = _net.order_by_health(entries) if self.failover else list(entries[:1])
             for index, entry in enumerate(candidates):
                 try:
-                    return await self._transports.get(entry).handle_async_request(request)
+                    return await self._transports.get(entry).handle_async_request(outgoing(request, entry))
                 except failover_errors:
                     if not self.failover:
                         raise
