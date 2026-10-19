@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "proxylib"
-version = "2.0.0"
+version = "2.0.1"
 authors = [{ name = "Jose A" }]
 description = "Platform-agnostic proxy configuration: detect system/env proxy settings, evaluate PAC files (with WPAD discovery), and wire the result into requests or urllib"
 readme = "README.md"
@@ -42,6 +42,7 @@ requests = "proxylib.integrations.autopatch"
 "urllib.request" = "proxylib.integrations.autopatch"
 httpx = "proxylib.integrations.autopatch"
 aiohttp = "proxylib.integrations.autopatch"
+"pip._vendor.requests" = "proxylib.integrations.autopatch"
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/proxylib/"

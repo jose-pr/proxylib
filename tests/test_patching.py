@@ -212,44 +212,92 @@ def test_importpatch_off_installs_nothing_until_patch_is_called():
     assert result.stdout.split() == ["HTTPAdapter", "None", "ProxyMapAdapter"], result.stderr
 
 
+AUTO = "import proxylib.patching as p; print(' '.join(t for t in p.targets() if repr(p.active(t)) == '<auto_proxy()>'))"
+
+
 @pytest.mark.parametrize(
     "value, auto",
     [
-        ("1", {"requests", "urllib", "httpx", "aiohttp"}),
-        ("TRUE", {"requests", "urllib", "httpx", "aiohttp"}),
+        ("1", {"requests", "urllib", "httpx", "aiohttp", "pip"}),
+        ("TRUE", {"requests", "urllib", "httpx", "aiohttp", "pip"}),
         ("", set()),
+        ("0", set()),
         ("requests:urllib.request:httpx", {"requests", "urllib", "httpx"}),
         (" aiohttp :: ", {"aiohttp"}),
+        ("pip._vendor.requests:pip", {"pip"}),
     ],
 )
-def test_importpatch_names_the_clients_that_use_auto_proxy(value, auto):
-    code = "import proxylib.patching as p; print(' '.join(t for t in p.targets() if repr(p.active(t)) == '<auto_proxy()>'))"
-    result = _run(code, PROXYLIB_IMPORTPATCH=value)
+def test_autoproxy_names_the_clients_that_use_auto_proxy(value, auto):
+    result = _run(AUTO, PROXYLIB_AUTOPROXY=value)
     assert set(result.stdout.split()) == auto, result.stderr
 
 
-def test_an_unknown_name_warns():
-    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_IMPORTPATCH="requests:pycurl")
-    assert result.stdout.strip() == "<auto_proxy()>"
-    assert "PROXYLIB_IMPORTPATCH names 'pycurl'" in result.stderr
+@pytest.mark.parametrize("value", ["", "1", "requests:httpx"])
+def test_importpatch_never_chooses_auto_proxy(value):
+    result = _run(AUTO, PROXYLIB_IMPORTPATCH=value)
+    assert result.stdout.split() == [], result.stderr
+
+
+INSTALLED = "import proxylib.patching as p; print(' '.join(sorted(n for n in p.targets() if p._wanted(n))))"
+
+
+@pytest.mark.parametrize(
+    "env, wanted",
+    [
+        ({}, {"requests", "urllib", "httpx", "aiohttp", "pip"}),
+        ({"PROXYLIB_IMPORTPATCH": "1"}, {"requests", "urllib", "httpx", "aiohttp", "pip"}),
+        ({"PROXYLIB_IMPORTPATCH": "requests"}, {"requests"}),
+        ({"PROXYLIB_IMPORTPATCH": "requests", "PROXYLIB_AUTOPROXY": "httpx"}, {"requests", "httpx"}),
+        ({"PROXYLIB_IMPORTPATCH": "0", "PROXYLIB_AUTOPROXY": "1"}, set()),
+    ],
+)
+def test_which_clients_are_installed(env, wanted):
+    result = _run(INSTALLED, **env)
+    assert set(result.stdout.split()) == wanted, result.stderr
+
+
+@pytest.mark.parametrize("variable", ["PROXYLIB_IMPORTPATCH", "PROXYLIB_AUTOPROXY"])
+def test_an_unknown_name_warns(variable):
+    result = _run("import proxylib.patching as p; p._wanted('requests'); p.active('requests')", **{variable: "requests:pycurl"})
+    assert f"{variable} names 'pycurl'" in result.stderr
 
 
 HTTPX = "type(httpx.Client()._transport).__name__"
 
 
-def test_httpx_is_patched_only_when_named():
-    for value, expected in (("", "HTTPTransport"), ("httpx", "ProxyTransport"), ("1", "ProxyTransport")):
-        result = _run(f"import proxylib, httpx; print({HTTPX})", PROXYLIB_IMPORTPATCH=value)
-        assert result.stdout.strip() == expected, (value, result.stderr)
-    result = _run(f"import proxylib, httpx; print(type(httpx.Client(transport=httpx.HTTPTransport())._transport).__name__)",
-                  PROXYLIB_IMPORTPATCH="httpx")
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        ({}, "HTTPTransport"),
+        ({"PROXYLIB_AUTOPROXY": "httpx"}, "ProxyTransport"),
+        ({"HTTP_PROXY": "PROXY a:1; DIRECT"}, "ProxyTransport"),
+        ({"HTTPS_PROXY": "prefix+https://gw/fetch/"}, "ProxyTransport"),
+        ({"HTTP_PROXY": "http://a:1"}, "HTTPTransport"),
+        ({"HTTP_PROXY": "PROXY a:1; DIRECT", "PROXYLIB_IMPORTPATCH": "requests"}, "InvalidURL"),
+    ],
+)
+def test_httpx_gets_proxylib_transport_only_when_it_has_something_to_read(env, expected):
+    code = f"""
+        import proxylib, httpx
+        try:
+            print({HTTPX})
+        except httpx.InvalidURL:
+            print("InvalidURL")
+        """
+    result = _run(code, **env)
+    assert result.stdout.strip() == expected, (env, result.stderr)
+
+
+def test_httpx_keeps_a_transport_the_program_gives():
+    code = "import proxylib, httpx; print(type(httpx.Client(transport=httpx.HTTPTransport())._transport).__name__)"
+    result = _run(code, PROXYLIB_AUTOPROXY="httpx")
     assert result.stdout.strip() == "HTTPTransport", result.stderr
 
 
-def test_aiohttp_is_patched_only_when_named():
+def test_aiohttp_is_patched_by_default():
     code = "import proxylib, aiohttp; print(getattr(aiohttp.ClientSession._request, '__wrapped__', None) is not None)"
-    assert _run(code).stdout.strip() == "False"
-    assert _run(code, PROXYLIB_IMPORTPATCH="aiohttp").stdout.strip() == "True"
+    assert _run(code).stdout.strip() == "True"
+    assert _run(code, PROXYLIB_IMPORTPATCH="requests").stdout.strip() == "False"
 
 
 def test_a_program_opener_is_left_alone():

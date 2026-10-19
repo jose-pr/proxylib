@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-20
+
+### Added
+
+- `PROXYLIB_AUTOPROXY` (`1`, or client names separated by `:`) makes those clients use
+  `auto_proxy()` — the proxy variables, the OS settings, PAC and WPAD. This is what
+  `PROXYLIB_IMPORTPATCH=1` or a name did in 2.0.0.
+- The `pip` patch target: pip's vendored requests (`pip._vendor.requests`) routes every
+  request through the active map like `ProxyMapAdapter` — failover, gateways, proxy
+  headers — through an importpatch entry point. `pip --proxy` and `--no-proxy-env` keep
+  pip's own choice, and pip's TLS context is left as it is.
+
+### Fixed
+
+- The default integration now does what 2.0.0 meant it to: every client — `requests`,
+  `urllib`, `httpx`, `aiohttp` and pip — keeps its own proxy choice and understands
+  proxylib's formats where it takes a proxy. `HTTP_PROXY="PROXY a:3128; PROXY b:3128;
+  DIRECT"` (which urllib, httpx and aiohttp rejected as an invalid URL) fails over along
+  the list, and a gateway (`prefix+https://gw/fetch/`) is used; `NO_PROXY` still applies.
+- `PROXYLIB_IMPORTPATCH` chooses which clients get the integration (unset: every one;
+  `0`: none until `patch()`), not which use `auto_proxy()`; that is `PROXYLIB_AUTOPROXY`.
+- With the aiohttp target installed, a DIRECT answer is direct even in a session that
+  trusts the environment.
+
 ## [2.0.0] - 2026-10-19
 
 2.0 breaks the 1.x API. The [migration guide](https://jose-pr.github.io/proxylib/migration-2.0/)
@@ -580,7 +604,8 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/jose-pr/proxylib/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/jose-pr/proxylib/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/jose-pr/proxylib/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/jose-pr/proxylib/compare/v1.0.1...v1.0.2

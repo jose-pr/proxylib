@@ -20,7 +20,7 @@ from typing import Any
 from urllib.error import URLError
 
 from .. import _net
-from ..proxy import Proxy, ProxyMap, lookup
+from ..proxy import Proxy, ProxyMap, _is_chain, _normalise, lookup
 from ._support import gateway_headers, urllib_reason, usable
 
 __all__ = ("ProxyMapHandler",)
@@ -37,7 +37,8 @@ class ProxyMapHandler(urllib_request.ProxyHandler):
 
     When the map has no opinion (``KeyError``), the request uses the proxy
     ``urllib.request.getproxies()`` names for its scheme, as the standard
-    ``ProxyHandler`` would.
+    ``ProxyHandler`` would -- read by proxylib when it is a PAC result or a
+    gateway, which urllib cannot use itself.
 
     A URL-prefix gateway gets the request at ``<gateway><URL>`` through the
     opener's own HTTP(S) handler, and the response keeps the target URL, so
@@ -65,7 +66,13 @@ class ProxyMapHandler(urllib_request.ProxyHandler):
             # No opinion: urllib's own choice, from the environment (and, on
             # Windows and macOS, the system settings urllib reads).
             fallback = urllib_request.getproxies().get(req.type)
-            return self.proxy_open(req, fallback, req.type) if fallback else None
+            if not fallback:
+                return None
+            if not _is_chain(fallback):
+                return self.proxy_open(req, fallback, req.type)
+            if req.host and urllib_request.proxy_bypass(req.host):
+                return None
+            entries = _normalise(fallback)
         proxy = _net.order_by_health(usable(entries, "urllib", req.full_url, urllib_reason))[0]
         if proxy is None:
             return None  # DIRECT: fall through to the default (non-proxying) handler.

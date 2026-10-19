@@ -36,9 +36,13 @@ failover along the list a PAC returns. Documentation:
   gateway fetching `<gateway><URL>`. A client skips the entries it cannot use and raises
   `UnsupportedProxyError` when none is left, instead of leaking a header or going
   elsewhere.
-- **Patched clients that behave as before** — `requests` and `urllib` get proxylib's
-  integration as they are imported, choosing exactly the proxy they always did until
-  you `patch()` a map in (nestable) or name them in `PROXYLIB_IMPORTPATCH`.
+- **Every client understands proxylib's proxy formats** — `requests`, `urllib`, `httpx`,
+  `aiohttp` and pip get proxylib's integration as they are imported. Each still chooses
+  its proxy as it always did, and proxylib reads what it cannot:
+  `HTTP_PROXY="PROXY a:3128; PROXY b:3128; DIRECT"` fails over, and
+  `HTTPS_PROXY=prefix+https://gw/fetch/` uses a gateway. `PROXYLIB_AUTOPROXY=1` (or
+  client names) makes them follow `auto_proxy()` — the OS settings, PAC and WPAD — and
+  `patch()` a map of your own (nestable); `pip --proxy` still wins.
 - **Bypass rules in each OS's syntax** — `NO_PROXY` (curl), Windows `ProxyOverride`,
   macOS `ExceptionsList`, GNOME `ignore-hosts`, KDE `NoProxyFor`: suffixes, globs, IPv4
   and IPv6 CIDR, ports, `<local>`, `<subnet>`.
@@ -157,9 +161,10 @@ with proxylib.patch(proxylib.auto_proxy()):
 ```
 
 Patches nest (the newest wins); `targets=["requests"]` limits one to a client. Without
-code, `PROXYLIB_IMPORTPATCH=1` (or client names: `requests:httpx`) makes those clients
-use `auto_proxy()` in every program that imports them, through importpatch;
-`PROXYLIB_IMPORTPATCH=0` turns the integration off.
+code, `PROXYLIB_AUTOPROXY=1` (or client names: `requests:httpx:pip`) makes those clients
+use `auto_proxy()` in every program that imports them, through importpatch.
+`PROXYLIB_IMPORTPATCH` chooses which clients get the integration at all (unset: every
+one) and `PROXYLIB_IMPORTPATCH=0` turns it off.
 
 ### PAC files
 

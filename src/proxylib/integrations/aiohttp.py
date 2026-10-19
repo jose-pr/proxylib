@@ -11,14 +11,16 @@ wraps a ``ClientSession``: every request asks the proxy map and is sent with
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 from typing import Any, Awaitable, Callable, Optional, Tuple
 from urllib.parse import urlsplit
+from urllib.request import proxy_bypass
 
 from .. import _net
 from ..exceptions import MissingExtraError
 from ..proxy import Proxy, ProxyMap, _is_chain, _normalise, alookup
-from ._support import no_gateway_or_socks, usable
+from ._support import env_chain, no_gateway_or_socks, usable
 
 _REASON = no_gateway_or_socks("aiohttp")
 
@@ -66,14 +68,17 @@ async def _routed(
     *,
     proxy_headers: Any = None,
     headers: Any = None,
+    trust_env: bool = False,
     failover: bool = True,
     bad_proxy_ttl: float = 300.0,
 ) -> Any:
     """``send(proxy=..., proxy_headers=..., headers=...)`` with the proxy
     chosen for ``url``: from ``proxy`` when it is a proxylib value, else from
     ``proxymap``; failing over along the answer, over the entries aiohttp can
-    use. A plain proxy URL, no opinion, or a request already routed is sent
-    with the arguments as given.
+    use. With no opinion and ``trust_env``, a PAC result or gateway in the
+    proxy variable aiohttp would read is read here instead. A plain proxy
+    URL, no opinion, or a request already routed is sent with the arguments
+    as given.
 
     aiohttp sends ``proxy_headers`` in a ``CONNECT`` only, so for a URL it
     does not tunnel a proxy's headers join the request's own, which goes to
@@ -84,10 +89,14 @@ async def _routed(
     if proxy is not None:
         entries = None if isinstance(proxy, str) and not _is_chain(proxy) else _normalise(proxy)
     else:
-        try:
-            entries = await alookup(proxymap, url)
-        except KeyError:
-            entries = None
+        entries = None
+        if getattr(proxymap, "decides", True):
+            try:
+                entries = await alookup(proxymap, url)
+            except KeyError:
+                pass
+        if entries is None and trust_env:
+            entries = await _env_entries(url)
     if entries is None:
         return await send(proxy=proxy, proxy_headers=proxy_headers, headers=headers)
     entries = tuple(usable(entries, "aiohttp", url, _REASON))
@@ -113,6 +122,19 @@ async def _routed(
         finally:
             _ROUTED.reset(token)
     raise RuntimeError("unreachable")
+
+
+async def _env_entries(url: str) -> "Optional[Tuple[Optional[Proxy], ...]]":
+    """The entries of a PAC result or gateway in the proxy variable aiohttp
+    reads for ``url`` (it cannot use one itself); ``None`` when there is none,
+    or ``NO_PROXY`` says direct, and aiohttp reads its environment itself."""
+    parts = urlsplit(url)
+    value = env_chain(parts.scheme.lower())
+    if value is None:
+        return None
+    if parts.hostname and await asyncio.to_thread(proxy_bypass, parts.hostname):
+        return None
+    return _normalise(value)
 
 
 class _Request:
@@ -160,9 +182,10 @@ class ProxySession:
     https request, as headers of a plain-http one (sent to the proxy). aiohttp speaks HTTP
     proxies only: SOCKS proxies and URL-prefix gateways in an answer are
     skipped, and an answer with nothing else raises
-    :class:`~proxylib.UnsupportedProxyError`. A session made with
-    ``trust_env=True`` uses the environment's proxy for a DIRECT entry, so
-    leave that off when the map decides.
+    :class:`~proxylib.UnsupportedProxyError`. Unless the ``aiohttp`` patch
+    target is installed (the default), a session made with ``trust_env=True``
+    uses the environment's proxy for a DIRECT entry, so leave that off when
+    the map decides.
     """
 
     def __init__(
@@ -241,6 +264,7 @@ class ProxySession:
             proxy,
             proxy_headers=proxy_headers,
             headers=headers,
+            trust_env=self.session.trust_env,
             failover=self.failover,
             bad_proxy_ttl=self.bad_proxy_ttl,
         )

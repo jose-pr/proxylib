@@ -57,12 +57,14 @@ The three changes most programs notice:
 
 ## Behaviour that changed
 
-- **Patching.** Importing proxylib gives `requests` and `urllib` an integration that
-  chooses exactly the proxy they would without proxylib, until you `patch()` a map in.
-  Through [importpatch](https://pypi.org/project/importpatch/) (a dependency) this also
-  happens in programs that never import proxylib. `PROXYLIB_IMPORTPATCH=1` (or client
-  names: `requests:httpx:aiohttp`) makes those clients use `auto_proxy()`;
-  `PROXYLIB_IMPORTPATCH=0` turns the integration off.
+- **Patching.** Importing proxylib gives `requests`, `urllib`, `httpx`, `aiohttp` and
+  pip an integration that chooses exactly the proxy they would without proxylib — and
+  reads a PAC result or gateway in a proxy variable, which they cannot — until you
+  `patch()` a map in. Through [importpatch](https://pypi.org/project/importpatch/) (a
+  dependency) this also happens in programs that never import proxylib.
+  `PROXYLIB_AUTOPROXY=1` (or client names: `requests:httpx:aiohttp`) makes those clients
+  use `auto_proxy()`; `PROXYLIB_IMPORTPATCH` chooses which clients are integrated at all,
+  and `PROXYLIB_IMPORTPATCH=0` turns the integration off.
 - **Failover.** `ProxyMapAdapter`, the httpx transports and the aiohttp `ProxySession`
   try the next entry of a `PROXY a; PROXY b; DIRECT` answer when one refuses or times
   out connecting.

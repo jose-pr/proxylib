@@ -12,9 +12,10 @@ import base64
 import logging
 from typing import Callable, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
+from urllib.request import getproxies_environment
 
 from ..exceptions import UnsupportedProxyError
-from ..proxy import Proxy
+from ..proxy import Proxy, _is_chain
 
 _log = logging.getLogger("proxylib.integrations")
 
@@ -71,6 +72,14 @@ def proxy_url_reason(proxy: Proxy, url: str) -> Optional[str]:
     if proxy._headers:
         return "a proxy URL string cannot carry proxy headers"
     return None
+
+
+def env_chain(scheme: str) -> Optional[str]:
+    """The proxy variable a client reads for ``scheme`` (``all`` included),
+    when it holds a PAC result or a gateway -- which proxylib reads in the
+    client's place; else ``None``."""
+    value = getproxies_environment().get(scheme)
+    return value if value and _is_chain(value) else None
 
 
 def gateway_headers(gateway: Proxy) -> "List[Tuple[str, str]]":
