@@ -51,6 +51,15 @@ def test_a_pip_session_sends_proxy_headers_and_keeps_pips_tls_context(
     assert "x-proxy-token" not in reached
 
 
+def test_pips_caching_adapter_routes_through_the_map(recording_proxy, tmp_path, no_proxy_env):
+    # CacheControlAdapter calls HTTPAdapter.send with positional arguments.
+    with proxylib.patch(SimpleProxyMap(f"PROXY 127.0.0.1:{recording_proxy.port}"), targets=["pip"]):
+        with PipSession(cache=str(tmp_path / "cache"), trusted_hosts=["example.test"]) as session:
+            assert type(session.get_adapter(INDEX)).__name__.endswith("CacheControlAdapter")
+            assert session.get(INDEX + "c/", timeout=10).text == "via proxy"
+    assert _targets(recording_proxy) == [INDEX + "c/"]
+
+
 def test_a_session_that_does_not_trust_the_environment_is_left_to_pip(
     recording_proxy, http_server, no_proxy_env
 ):
@@ -74,7 +83,7 @@ def _pip_download(tmp_path, *args, **env):
     environ = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy") and not k.startswith("PROXYLIB_")}
     environ.update(env)
     command = [
-        sys.executable, "-m", "pip", "download", "somepkg", "--no-deps", "--no-cache-dir",
+        sys.executable, "-m", "pip", "download", "somepkg", "--no-deps", "--cache-dir", str(tmp_path / "cache"),
         "--disable-pip-version-check", "--retries", "0", "--timeout", "5",
         "--index-url", INDEX, "--trusted-host", "example.test", "-d", str(tmp_path), *args,
     ]

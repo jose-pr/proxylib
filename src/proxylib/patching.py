@@ -24,7 +24,6 @@ OS resolver and settings, PAC and WPAD. A client named there is installed.
 
 from __future__ import annotations
 
-import contextvars
 import functools
 import importlib.util
 import os
@@ -364,10 +363,12 @@ _requests_init: "Optional[Callable]" = None
 
 
 def _install_requests(proxymap: ProxyMap) -> None:
-    global _requests_init
+    global _requests_init, _requests_caller
     # requests.sessions, not requests: the package is still initialising when
     # its own imports (urllib.request) load proxylib, and Session comes last.
     import requests.sessions as sessions
+
+    from .integrations.requests import _record_caller
 
     original = sessions.Session.__init__
 
@@ -375,21 +376,30 @@ def _install_requests(proxymap: ProxyMap) -> None:
         from .integrations.requests import ProxyMapAdapter
 
         original(self, *args, **kwargs)
-        self.mount("https://", ProxyMapAdapter(proxymap))
-        self.mount("http://", ProxyMapAdapter(proxymap))
+        for prefix in ("https://", "http://"):
+            adapter = ProxyMapAdapter(proxymap)
+            adapter._patched = True
+            self.mount(prefix, adapter)
 
     __init__.__wrapped__ = original  # type: ignore[attr-defined]
     _requests_init = original
     sessions.Session.__init__ = __init__
+    _requests_caller = _record_caller(sessions)
+
+
+_requests_caller: "Optional[Callable[[], None]]" = None
 
 
 def _uninstall_requests() -> None:
-    global _requests_init
+    global _requests_init, _requests_caller
     if _requests_init is not None:
         import requests.sessions as sessions
 
         sessions.Session.__init__ = _requests_init
         _requests_init = None
+    if _requests_caller is not None:
+        _requests_caller()
+        _requests_caller = None
 
 
 _urllib_opener = None
@@ -515,62 +525,55 @@ def _uninstall_aiohttp() -> None:
         _aiohttp_originals = None
 
 
-_pip_originals: "Optional[Tuple[type, Callable, Callable, type, Callable]]" = None
-
-# Whether the pip session sending the request trusts the environment: pip's
-# --proxy and --no-proxy-env turn trust_env off, and proxylib then stays out.
-_PIP_TRUST_ENV: "contextvars.ContextVar[bool]" = contextvars.ContextVar("proxylib_pip_trust_env", default=True)
+_pip_originals: "Optional[Tuple[type, Callable, Callable, Callable[[], None]]]" = None
 
 
 def _install_pip(proxymap: ProxyMap) -> None:
     """Every HTTP adapter of pip's vendored requests routes through the active
     map, with failover, gateways and proxy headers, as ``ProxyMapAdapter``
-    does, for a session that trusts the environment. pip mounts its own
-    adapters after ``Session.__init__``, so the hook is on the base
-    ``HTTPAdapter`` class; pip's TLS context reaches the proxy managers as
-    pip passes it."""
+    does, for a session that trusts the environment (pip's ``--proxy`` and
+    ``--no-proxy-env`` turn ``trust_env`` off, and pip then decides). pip
+    mounts its own adapters after ``Session.__init__``, so the hook is on the
+    base ``HTTPAdapter`` class; pip's TLS context reaches the proxy managers
+    as pip passes it."""
     global _pip_originals
     import pip._vendor.requests.sessions as sessions
 
-    from .integrations.requests import _toolkit
+    from .integrations.requests import _record_caller, _send_kwargs, _toolkit
 
     kit = _toolkit("pip._vendor.requests")
     adapter = kit.HTTPAdapter
     original_send, original_manager = adapter.send, adapter.proxy_manager_for
-    original_session_send = sessions.Session.send
 
-    def send(self, request, **kwargs):
-        if not _PIP_TRUST_ENV.get():
-            return original_send(self, request, **kwargs)
+    def send(self, request, *args, **kwargs):
+        # pip's CacheControlAdapter passes stream, timeout, ... positionally.
         return kit.send(
-            functools.partial(original_send, self), request, kwargs, proxymap, failover=True, bad_proxy_ttl=300.0
+            functools.partial(original_send, self),
+            request,
+            _send_kwargs(args, kwargs),
+            proxymap,
+            failover=True,
+            bad_proxy_ttl=300.0,
+            patched=True,
         )
 
     def proxy_manager_for(self, proxy, **proxy_kwargs):
         return kit.proxy_manager_for(self, functools.partial(original_manager, self), proxy, proxy_kwargs)
 
-    def session_send(self, request, **kwargs):
-        token = _PIP_TRUST_ENV.set(bool(self.trust_env))
-        try:
-            return original_session_send(self, request, **kwargs)
-        finally:
-            _PIP_TRUST_ENV.reset(token)
-
-    for wrapper, original in ((send, original_send), (proxy_manager_for, original_manager), (session_send, original_session_send)):
+    for wrapper, original in ((send, original_send), (proxy_manager_for, original_manager)):
         wrapper.__wrapped__ = original  # type: ignore[attr-defined]
-    _pip_originals = (adapter, original_send, original_manager, sessions.Session, original_session_send)
     adapter.send = send
     adapter.proxy_manager_for = proxy_manager_for
-    sessions.Session.send = session_send
+    _pip_originals = (adapter, original_send, original_manager, _record_caller(sessions))
 
 
 def _uninstall_pip() -> None:
     global _pip_originals
     if _pip_originals is not None:
-        adapter, original_send, original_manager, session, original_session_send = _pip_originals
+        adapter, original_send, original_manager, undo_caller = _pip_originals
         adapter.send = original_send
         adapter.proxy_manager_for = original_manager
-        session.send = original_session_send
+        undo_caller()
         _pip_originals = None
 
 

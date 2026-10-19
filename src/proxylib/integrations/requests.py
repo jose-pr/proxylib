@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextvars
 import functools
 import importlib
+import inspect
 from collections import ChainMap
 from types import SimpleNamespace
 from typing import Any, Callable, Optional, Tuple
@@ -31,6 +32,69 @@ __all__ = ("ProxyMapAdapter",)
 _CHOSEN: "contextvars.ContextVar[Optional[Tuple[str, tuple]]]" = contextvars.ContextVar(
     "proxylib_requests_proxy_headers", default=None
 )
+
+# HTTPAdapter.send(request, stream, timeout, verify, cert, proxies): callers
+# such as cachecontrol's adapter pass these positionally.
+_SEND_ARGS = ("stream", "timeout", "verify", "cert", "proxies")
+
+
+def _send_kwargs(args: tuple, kwargs: "dict") -> "dict":
+    """``HTTPAdapter.send``'s arguments after the request, all by name."""
+    if len(args) > len(_SEND_ARGS):
+        raise TypeError(f"send() takes at most {len(_SEND_ARGS) + 1} positional arguments after self")
+    return {**dict(zip(_SEND_ARGS, args)), **kwargs}
+
+
+# (trust_env, the caller's own proxies) of the session request being sent,
+# recorded before requests merges the environment's proxies into them; None
+# when the adapter is used outside a session _record_caller() wrapped.
+_CALLER: "contextvars.ContextVar[Optional[Tuple[bool, Any]]]" = contextvars.ContextVar(
+    "proxylib_requests_caller", default=None
+)
+
+
+def _record_caller(sessions: Any) -> "Callable[[], None]":
+    """Wrap ``sessions.Session.request`` and ``send`` (``requests.sessions``, or
+    a vendored copy) to record each request's ``trust_env`` and the proxies
+    its caller gave (``proxies=`` over ``session.proxies``), so the adapter
+    can tell them from the environment's. Returns the undo."""
+    session_class = sessions.Session
+    original_request, original_send = session_class.request, session_class.send
+    signature = inspect.signature(original_request)
+
+    def caller(session: Any, proxies: Any) -> "Tuple[bool, Any]":
+        return bool(session.trust_env), sessions.merge_setting(proxies, session.proxies)
+
+    def request(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            proxies = signature.bind_partial(self, *args, **kwargs).arguments.get("proxies")
+        except TypeError:
+            proxies = None
+        token = _CALLER.set(caller(self, proxies))
+        try:
+            return original_request(self, *args, **kwargs)
+        finally:
+            _CALLER.reset(token)
+
+    def send(self: Any, request: Any, **kwargs: Any) -> Any:
+        if _CALLER.get() is not None:
+            return original_send(self, request, **kwargs)
+        token = _CALLER.set(caller(self, kwargs.get("proxies")))
+        try:
+            return original_send(self, request, **kwargs)
+        finally:
+            _CALLER.reset(token)
+
+    request.__wrapped__ = original_request  # type: ignore[attr-defined]
+    send.__wrapped__ = original_send  # type: ignore[attr-defined]
+    session_class.request = request
+    session_class.send = send
+
+    def undo() -> None:
+        session_class.request = original_request
+        session_class.send = original_send
+
+    return undo
 
 
 @functools.lru_cache(maxsize=None)
@@ -58,14 +122,30 @@ def _toolkit(package: str) -> Any:
             (urllib3_errors.NewConnectionError, urllib3_errors.ConnectTimeoutError, urllib3_errors.ProxyError),
         )
 
-    def entries(proxymap: ProxyMap, url: str, proxies: Any) -> "Optional[Tuple[Tuple[Optional[Proxy], ...], bool]]":
+    def entries(
+        proxymap: ProxyMap, url: str, proxies: Any, patched: bool
+    ) -> "Optional[Tuple[Tuple[Optional[Proxy], ...], bool]]":
         """The entries to try and whether they outrank the caller's
-        ``proxies``; ``None`` leaves the request to requests."""
+        ``proxies``; ``None`` leaves the request to requests. ``patched``: the
+        adapter a patch target installed, whose map a session that does not
+        trust the environment ignores."""
         if isinstance(proxies, ProxyDict):
             try:
                 return lookup(proxies.proxymap, url), True
             except KeyError:
                 pass
+        caller = _CALLER.get()
+        if caller is not None and not isinstance(proxies, ProxyDict):
+            trust_env, explicit = caller
+            mine = utils.select_proxy(url, explicit) if explicit and not isinstance(explicit, ProxyDict) else None
+            if mine is not None or (patched and not trust_env):
+                # The caller's own proxy, or a session that ignores the
+                # environment: requests decides, and proxylib reads only a
+                # value requests cannot.
+                value = mine if mine is not None else (utils.select_proxy(url, proxies) if proxies else None)
+                if isinstance(value, str) and not _is_chain(value):
+                    return None
+                return (_normalise(value), True) if value else None
         try:
             return lookup(proxymap, url), False
         except KeyError:
@@ -115,12 +195,13 @@ def _toolkit(package: str) -> Any:
         *,
         failover: bool,
         bad_proxy_ttl: float,
+        patched: bool = False,
     ) -> Any:
         """``base(request, **kwargs)`` -- the adapter's own send -- through
         the entries ``proxymap`` (or the caller's ``proxies``) gives."""
         proxies = kwargs.get("proxies") or {}
         parts = urlsplit(request.url)
-        found = entries(proxymap, request.url, proxies) if parts.hostname else None
+        found = entries(proxymap, request.url, proxies, patched) if parts.hostname else None
         if found is None:
             return base(request, **kwargs)
         answer, ours_first = found
@@ -208,9 +289,12 @@ def _build_adapter_class() -> type:
         the call's and the environment's ``proxies``, as without this adapter
         -- except that a proxylib value there (a PAC result such as ``"PROXY
         a:1; DIRECT"``, a list of proxies, a ``Proxy`` or a ``ProxyDict``) is
-        resolved and failed over the same way. A ``ProxyDict``, and a caller's
-        own entry at the ``scheme://hostname`` key ``requests`` reads first,
-        win over the map.
+        resolved and failed over the same way. The caller's own proxies win
+        over the map: a ``ProxyDict``, or an entry for the URL in the call's or
+        the session's ``proxies`` (any key requests reads) when the session is
+        wrapped by the requests patch target, else an entry at the
+        ``scheme://hostname`` key; entries requests takes from the environment
+        do not.
         """
 
         def __init__(
@@ -224,19 +308,22 @@ def _build_adapter_class() -> type:
             self.proxymap = proxymap
             self.failover = failover
             self.bad_proxy_ttl = bad_proxy_ttl
+            # Set by the requests patch target on the adapters it mounts.
+            self._patched = False
             super().__init__(*args, **kwargs)
 
         def proxy_manager_for(self, proxy: str, **proxy_kwargs: Any) -> Any:
             return kit.proxy_manager_for(self, super().proxy_manager_for, proxy, proxy_kwargs)
 
-        def send(self, request: "PreparedRequest", **kwargs: Any):
+        def send(self, request: "PreparedRequest", *args: Any, **kwargs: Any):
             return kit.send(
                 super().send,
                 request,
-                kwargs,
+                _send_kwargs(args, kwargs),
                 self.proxymap,
                 failover=self.failover,
                 bad_proxy_ttl=self.bad_proxy_ttl,
+                patched=self._patched,
             )
 
     return ProxyMapAdapter

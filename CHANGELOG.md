@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-10-20
+
+### Fixed
+
+- **pip failed in an environment with proxylib 2.0.1 installed** whenever it used its
+  HTTP cache (the default, and the build-dependency step of every source build): pip's
+  caching adapter passes `send()` arguments by position, which the pip target's hook did
+  not take (`TypeError: send() takes 2 positional arguments but 7 were given`). The hook
+  and `ProxyMapAdapter.send` now take them. To upgrade from 2.0.1, turn the hook off for
+  that one command: `IMPORTPATCH_DISABLE=1 pip install -U proxylib` (PowerShell:
+  `$env:IMPORTPATCH_DISABLE=1; pip install -U proxylib`).
+- requests (and pip): a caller's own proxies beat the patched map again, as requests
+  itself does — `proxies={"http": ...}` or `{"all": ...}` on the call, or
+  `session.proxies`; before, only a `scheme://host` entry did, since the adapter could
+  not tell a caller's entry from one requests adds from the environment. The requests
+  patch target now records the caller's proxies before requests merges the
+  environment's. A proxylib value given by the caller (a PAC result, a gateway) is
+  still read.
+- A session with `trust_env=False` is left to requests again: the map of the adapters
+  the patch target mounts (the OS's or the environment's proxy, or a `patch()`) is not
+  consulted, as pip's `--proxy` already was. An adapter the program mounts itself keeps
+  its map.
+
 ## [2.0.1] - 2026-10-20
 
 ### Added
@@ -604,7 +627,8 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/jose-pr/proxylib/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/jose-pr/proxylib/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/jose-pr/proxylib/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/jose-pr/proxylib/compare/v1.0.2...v1.1.0
