@@ -86,10 +86,10 @@ maps every removed or renamed 1.x name to its 2.0 form.
   `repr()` hides the values.
 - URL-prefix gateways: `prefix+http(s)://host[:port]/path/` (`Proxy(..., path=...)`), or
   `PREFIX https://gw/path/` in a PAC result, sends the request for a URL directly to
-  `<gateway><URL>`; requests and httpx keep the target as the response's URL, so cookies
-  and redirects belong to it.
+  `<gateway><URL>`; requests, httpx and urllib keep the target as the response's URL, so
+  cookies and redirects belong to it.
 - `UnsupportedProxyError`: each client integration skips the entries its client cannot
-  use (gateways and SOCKS for aiohttp and urllib; for urllib, headers other than
+  use (gateways and SOCKS for aiohttp, SOCKS for urllib; for urllib, headers other than
   `Proxy-Authorization` on https URLs; gateways and headers for `ProxyDict`) and raises
   this when nothing usable is left.
 - A proxy variable may hold a whole PAC result: `HTTP_PROXY="PROXY a:3128; SOCKS5

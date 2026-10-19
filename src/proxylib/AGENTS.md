@@ -411,9 +411,9 @@ instead of sending the request somewhere else.
 | HTTP proxy | yes | yes | yes | yes | yes |
 | SOCKS proxy | with `requests[socks]` | with `httpx[socks]` | no | no | yes |
 | Proxy `headers` | yes | yes | yes | `Proxy-Authorization` only, for https URLs | no |
-| URL-prefix gateway | yes | yes | no | no | no |
+| URL-prefix gateway | yes | yes | no | yes | no |
 
-Through a gateway (requests, httpx) the response keeps the original request and URL, so
+Through a gateway (requests, httpx, urllib) the response keeps the original request and URL, so
 cookies and relative redirects belong to the target, and each redirect goes through the
 gateway again.
 
@@ -446,6 +446,8 @@ A `urllib.request.ProxyHandler` subclass resolving per request. It uses the heal
 usable entry and does not fail over (urllib cannot re-send a request through another
 proxy). A proxy's headers are added unredirected; for an https URL only
 `Proxy-Authorization` is usable, since urllib moves only that one into the `CONNECT`.
+A gateway request goes through the opener's own HTTP(S) handler, and the response
+carries the target URL, so `HTTPCookieProcessor` and the redirect handler see the target.
 DIRECT falls through to the non-proxying handler; no opinion uses the proxy
 `urllib.request.getproxies()` names for the scheme, as the standard handler would.
 

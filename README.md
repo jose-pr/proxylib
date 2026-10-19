@@ -221,7 +221,7 @@ Moving from 1.x: [migration guide](https://jose-pr.github.io/proxylib/migration-
   aiohttp. Failover happens only for errors before the request is sent.
 - **SOCKS proxies need the client's SOCKS support**: `requests[socks]` for requests,
   `httpx[socks]` for httpx; aiohttp and urllib speak HTTP proxies only.
-- **Gateways work with requests and httpx only**; aiohttp and urllib skip them. urllib
+- **aiohttp skips gateways** (requests, httpx and urllib take them). urllib
   sends only a `Proxy-Authorization` proxy header for https URLs (it would send any
   other through the tunnel), so it skips a proxy with other headers there.
 
