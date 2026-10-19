@@ -53,6 +53,8 @@ def no_gateway_or_socks(client: str) -> Reason:
 
 
 def urllib_reason(proxy: Proxy, url: str) -> Optional[str]:
+    if proxy.is_gateway:
+        return None
     why = no_gateway_or_socks("urllib")(proxy, url)
     if why is None and urlsplit(url).scheme.lower() == "https":
         # urllib moves only Proxy-Authorization into the CONNECT; any other

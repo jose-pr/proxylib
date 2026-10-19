@@ -230,11 +230,41 @@ def _open(proxymap, url, context=None):
 
 
 def test_urllib_skips_what_it_cannot_use(recording_proxy, no_proxy_env):
-    pac = f"PREFIX http://gw:1/; SOCKS5 s:1; PROXY 127.0.0.1:{recording_proxy.port}"
+    pac = f"SOCKS5 s:1; SOCKS4 t:1; PROXY 127.0.0.1:{recording_proxy.port}"
     assert _open(SimpleProxyMap(pac), "http://example.test/") == b"via proxy"
     with pytest.raises(UnsupportedProxyError) as raised:
-        _open(SimpleProxyMap("PREFIX http://gw:1/; SOCKS5 s:1"), "http://example.test/")
+        _open(SimpleProxyMap("SOCKS5 s:1; SOCKS4 t:1"), "http://example.test/")
     assert raised.value.client == "urllib" and len(raised.value.proxies) == 2
+
+
+def test_urllib_through_a_gateway_keeps_the_target_url_cookies_and_redirects(gateway, no_proxy_env):
+    import http.cookiejar
+
+    jar = http.cookiejar.CookieJar()
+    pac = f"PREFIX http://user:pw@127.0.0.1:{gateway.port}/fetch/"
+    opener = urllib.request.build_opener(ProxyMapHandler(SimpleProxyMap(pac)), urllib.request.HTTPCookieProcessor(jar))
+    with opener.open("http://example.test/page", timeout=10) as response:
+        assert (response.read(), response.geturl()) == (b"via gateway", "http://example.test/page")
+    assert [(c.domain, c.name) for c in jar] == [("example.test", "seen")]
+    with opener.open("http://example.test/redirect", timeout=10) as response:
+        assert response.geturl() == "http://example.test/landed"
+    assert [target for _, target, _ in gateway.seen] == [
+        "/fetch/http://example.test/page",
+        "/fetch/http://example.test/redirect",
+        "/fetch/http://example.test/landed",
+    ]
+    _, _, headers = gateway.seen[0]
+    assert headers["proxy-authorization"] == "Basic dXNlcjpwdw=="
+    assert headers["host"] == f"127.0.0.1:{gateway.port}"
+    assert "seen=1" in gateway.seen[1][2].get("cookie", "")
+
+
+def test_urllib_through_an_https_gateway(tls_server, no_proxy_env):
+    context = ssl.create_default_context(cafile=tls_server.cafile)
+    pac = f"PREFIX https://127.0.0.1:{tls_server.port}/g/"
+    assert _open(SimpleProxyMap(pac), "http://example.test/a", context) == b"tls ok"
+    [(_, target, _)] = tls_server.seen
+    assert target == "/g/http://example.test/a"
 
 
 def test_urllib_sends_proxy_authorization_in_the_connect_only(recording_proxy, tls_server, no_proxy_env):
