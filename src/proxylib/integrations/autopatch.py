@@ -1,10 +1,11 @@
-"""The ``importpatch`` entry point of ``proxylib[patch]``: installs proxylib's
-integration for a client (``requests``, ``urllib.request``) as soon as the
-client is imported, in any program of the environment.
+"""proxylib's ``importpatch`` entry point: installs proxylib's integration for
+a client (``requests``, ``urllib.request``, ``httpx``, ``aiohttp``) as soon
+as it is imported, in any program of the environment, as
+``PROXYLIB_IMPORTPATCH`` says (see :mod:`proxylib.patching`).
 
-Disable it in ``pyimportpatch.cfg`` with ``proxylib.integrations.autopatch =
-false`` under the client's section, or everywhere with
-``PROXYLIB_AUTO_PATCH=0``.
+Disable it per client in ``pyimportpatch.cfg`` with
+``proxylib.integrations.autopatch = false`` under the client's section, or
+everywhere with ``PROXYLIB_IMPORTPATCH=0``.
 """
 
 from __future__ import annotations

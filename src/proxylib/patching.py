@@ -1,26 +1,35 @@
-"""Wire proxy maps into HTTP clients: ``requests`` and ``urllib.request``
-built in, others through :func:`register_patcher`.
+"""Wire proxy maps into HTTP clients: ``requests``, ``urllib``, ``httpx`` and
+``aiohttp`` built in, others through :func:`register_patcher`.
 
-Each client gets proxylib's integration once, when proxylib and the client
-are both imported (with the ``proxylib[patch]`` extra, whenever the client is
-imported, in any program). The integration asks a map that stands for "the
-active map": the newest :func:`patch` that covers the client, else the
-default. The default has no opinion, so a client behaves exactly as it would
-without proxylib; with ``PROXYLIB_AUTO_PATCH=1`` it is :func:`auto_proxy`, and
-with ``PROXYLIB_AUTO_PATCH=0`` nothing is installed until :func:`patch` is
-called.
+Each client gets proxylib's integration once, when it is imported, in any
+program of the environment: proxylib's ``importpatch`` entry points run at
+interpreter start, and importing proxylib registers the same hooks. The
+integration asks the client's *active map*: the newest :func:`patch` that
+covers it, else its default.
+
+``PROXYLIB_IMPORTPATCH`` chooses the defaults, as syshttp's
+``SYSHTTP_IMPORTPATCH`` does: ``1``/``true``/``yes``/``on`` for every target,
+or target names separated by commas or spaces (``requests, httpx``; a client's
+module name, such as ``urllib.request``, works too). A named target's default is
+:func:`~proxylib.auto_proxy`. Unset or empty, nothing is named: ``requests`` and
+``urllib`` still get the integration, with a default that has no opinion, so
+they choose their proxy exactly as without proxylib; ``httpx`` and
+``aiohttp``, whose integration would change that, get none.
+``0``/``false``/``no``/``off`` installs nothing until :func:`patch` is called.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 import threading
 import warnings
 from typing import Callable, Dict, FrozenSet, Iterable, List, NamedTuple, Optional, Tuple
 
-from . import _importhook
+import importpatch
+
 from .exceptions import MissingExtraError
 from .proxy import Proxy, ProxyMap, lookup
 
@@ -29,6 +38,9 @@ __all__ = ("Patch", "active", "patch", "register_patcher", "targets", "unpatch")
 InstallFunc = Callable[[ProxyMap], None]
 UninstallFunc = Callable[[], None]
 
+SETTING = "PROXYLIB_IMPORTPATCH"
+# The importpatch patcher (also proxylib's entry point); it calls _on_import.
+_AUTOPATCH = "proxylib.integrations.autopatch"
 _TRUE = ("1", "true", "yes", "on")
 _FALSE = ("0", "false", "no", "off")
 
@@ -37,6 +49,9 @@ class _Target(NamedTuple):
     module: str
     install: InstallFunc
     uninstall: UninstallFunc
+    # Installed without being named: its integration keeps the client's own
+    # behaviour under a default with no opinion.
+    unnamed: bool
 
 
 _lock = threading.RLock()
@@ -44,27 +59,37 @@ _registry: "Dict[str, _Target]" = {}
 _installed: "set[str]" = set()
 _hooked: "set[str]" = set()
 _frames: "List[Patch]" = []
-_default: "Optional[ProxyMap]" = None
 
 
-def _mode() -> str:
-    """``PROXYLIB_AUTO_PATCH``: ``"auto"`` (true), ``"off"`` (false) or
-    ``"default"`` (unset or empty)."""
-    value = os.environ.get("PROXYLIB_AUTO_PATCH", "").strip().lower()
-    if value in _TRUE:
-        return "auto"
-    if value in _FALSE:
-        return "off"
-    if value:
-        warnings.warn(
-            f"PROXYLIB_AUTO_PATCH={value!r} is not a boolean (1/0, true/false, yes/no, on/off); ignored",
-            stacklevel=3,
-        )
-    return "default"
+class _Setting(NamedTuple):
+    off: bool
+    named: "FrozenSet[str]"
+
+
+def _setting() -> _Setting:
+    """``PROXYLIB_IMPORTPATCH``, read when a client is imported."""
+    raw = os.environ.get(SETTING, "").strip()
+    if raw.lower() in _FALSE:
+        return _Setting(True, frozenset())
+    if raw.lower() in _TRUE:
+        return _Setting(False, frozenset(_registry))
+    by_module = {target.module: name for name, target in _registry.items()}
+    by_module["urllib.request"] = "urllib"
+    names = set()
+    for part in re.split(r"[\s,]+", raw):
+        if not part:
+            continue
+        name = by_module.get(part, part)
+        if name in _registry:
+            names.add(name)
+        else:
+            warnings.warn(f"{SETTING} names {part!r}, which is not one of {', '.join(_registry)}", stacklevel=3)
+    return _Setting(False, frozenset(names))
 
 
 class _NoOpinion:
-    """The default map: every lookup has no opinion, so the client decides."""
+    """The default of a target not named: every lookup has no opinion, so the
+    client decides."""
 
     __slots__ = ()
 
@@ -76,7 +101,8 @@ class _NoOpinion:
 
 
 class _AutoProxy:
-    """``auto_proxy()``, built on the first lookup."""
+    """``auto_proxy()``, built on the first lookup; shared by every named
+    target."""
 
     __slots__ = ("_map", "_lock")
 
@@ -97,17 +123,17 @@ class _AutoProxy:
         return lookup(self._map, url)
 
 
-def _default_map() -> ProxyMap:
-    global _default
-    with _lock:
-        if _default is None:
-            _default = _AutoProxy() if _mode() == "auto" else _NoOpinion()
-        return _default
+_NO_OPINION = _NoOpinion()
+_AUTO_PROXY = _AutoProxy()
+
+
+def _default_map(target: str) -> ProxyMap:
+    return _AUTO_PROXY if target in _setting().named else _NO_OPINION
 
 
 class _ActiveMap:
-    """What an installed client asks: the newest patch covering it, else the
-    default map."""
+    """What an installed client asks: the newest patch covering it, else its
+    default."""
 
     __slots__ = ("target",)
 
@@ -127,7 +153,7 @@ def active(target: str) -> ProxyMap:
         for handle in reversed(_frames):
             if handle.targets is None or target in handle.targets:
                 return handle.proxymap
-    return _default_map()
+    return _default_map(target)
 
 
 def _install(name: str) -> None:
@@ -146,24 +172,31 @@ def _install(name: str) -> None:
         _installed.add(name)
 
 
+def _wanted(name: str) -> bool:
+    """Whether ``name`` is installed when its client is imported."""
+    with _lock:
+        if any(handle.targets is None or name in handle.targets for handle in _frames):
+            return True
+    setting = _setting()
+    return not setting.off and (_registry[name].unnamed or name in setting.named)
+
+
 def _on_import(module_name: str) -> None:
-    """Install every target whose client is ``module_name``."""
-    if _mode() == "off" and not _frames:
-        return
+    """Install every wanted target whose client is ``module_name``."""
     for name, target in list(_registry.items()):
-        if target.module == module_name:
+        if target.module == module_name and _wanted(name):
             _install(name)
 
 
 def _install_ready() -> None:
-    """Install every target whose client is fully imported. An install
+    """Install every wanted target whose client is fully imported. An install
     attempted while proxylib itself was still being imported (from a hook on
     a module proxylib imports) fails and is retried here."""
-    if _mode() == "off" and not _frames:
-        return
     for name, target in list(_registry.items()):
         module = sys.modules.get(target.module)
-        if module is not None and not getattr(getattr(module, "__spec__", None), "_initializing", False):
+        if module is None or getattr(getattr(module, "__spec__", None), "_initializing", False):
+            continue
+        if _wanted(name):
             _install(name)
 
 
@@ -174,7 +207,8 @@ def _hook(name: str) -> None:
             return
         _hooked.add(name)
         module = _registry[name].module
-    _importhook.when_imported(module, _on_import)
+    # importpatch runs it at once when the client is already imported.
+    importpatch.add(module, _AUTOPATCH)
 
 
 class Patch:
@@ -237,6 +271,8 @@ def patch(proxymap: ProxyMap, *, targets: "Optional[Iterable[str]]" = None) -> P
         if names is not None:
             importlib.import_module(_registry[name].module)
         _hook(name)
+    # Clients already imported, which the hook saw before this patch wanted them.
+    _install_ready()
     return handle
 
 
@@ -252,19 +288,22 @@ def register_patcher(
     uninstall: UninstallFunc,
     *,
     module: str,
+    unnamed: bool = False,
     replace: bool = False,
 ) -> None:
     """Register a client integration. ``install(proxymap)`` is called once,
-    when ``module`` (the client) has been imported, with a map that always
-    answers as the active map does; ``uninstall()`` removes it. An existing
-    ``name`` raises ``ValueError`` unless ``replace=True``."""
+    when ``module`` (the client) has been imported and the target is wanted
+    (named in ``PROXYLIB_IMPORTPATCH``, patched from code, or ``unnamed=True``:
+    an integration that keeps the client's own behaviour while its map has no
+    opinion), with a map that always answers as the active map does;
+    ``uninstall()`` removes it. An existing ``name`` raises ``ValueError``
+    unless ``replace=True``."""
     with _lock:
         if name in _registry and not replace:
             raise ValueError(f"patch target {name!r} is already registered")
-        _registry[name] = _Target(module, install, uninstall)
+        _registry[name] = _Target(module, install, uninstall, unnamed)
         _hooked.discard(name)
-    if _mode() != "off":
-        _hook(name)
+    _hook(name)
 
 
 def targets() -> "Tuple[str, ...]":
@@ -342,5 +381,72 @@ def _uninstall_urllib() -> None:
     _urllib_opener = None
 
 
-register_patcher("requests", _install_requests, _uninstall_requests, module="requests.sessions")
-register_patcher("urllib", _install_urllib, _uninstall_urllib, module="urllib.request")
+_httpx_inits: "List[Tuple[type, Callable]]" = []
+
+
+def _install_httpx(proxymap: ProxyMap) -> None:
+    """``httpx.Client`` and ``AsyncClient`` made without ``transport``,
+    ``proxy``, ``proxies`` or ``mounts`` get a proxylib transport over the
+    active map; ``verify``, ``cert``, ``http1``, ``http2``, ``limits`` and
+    ``trust_env`` go to its inner transports."""
+    import httpx
+
+    from .integrations.httpx import AsyncProxyTransport, ProxyTransport
+
+    for client_class, transport_class in ((httpx.Client, ProxyTransport), (httpx.AsyncClient, AsyncProxyTransport)):
+        original = client_class.__init__
+
+        def __init__(self, *args, __original=original, __transport=transport_class, **kwargs):
+            if not any(kwargs.get(key) is not None for key in ("transport", "proxy", "proxies", "mounts")):
+                inner = {k: kwargs[k] for k in ("verify", "cert", "http1", "http2", "limits", "trust_env") if k in kwargs}
+                kwargs["transport"] = __transport(proxymap, **inner)
+            __original(self, *args, **kwargs)
+
+        __init__.__wrapped__ = original  # type: ignore[attr-defined]
+        client_class.__init__ = __init__
+        _httpx_inits.append((client_class, original))
+
+
+def _uninstall_httpx() -> None:
+    while _httpx_inits:
+        client_class, original = _httpx_inits.pop()
+        client_class.__init__ = original
+
+
+_aiohttp_request: "Optional[Callable]" = None
+
+
+def _install_aiohttp(proxymap: ProxyMap) -> None:
+    """``ClientSession`` requests take ``proxy=`` from the active map, with
+    failover; a proxy URL the caller gives is aiohttp's own."""
+    global _aiohttp_request
+    import aiohttp
+
+    from .integrations.aiohttp import _routed
+
+    original = aiohttp.ClientSession._request
+
+    async def _request(self, method, str_or_url, **kwargs):
+        async def send(**proxy_kwargs):
+            return await original(self, method, str_or_url, **{**kwargs, **proxy_kwargs})
+
+        return await _routed(send, proxymap, str(str_or_url), kwargs.pop("proxy", None))
+
+    _request.__wrapped__ = original  # type: ignore[attr-defined]
+    _aiohttp_request = original
+    aiohttp.ClientSession._request = _request
+
+
+def _uninstall_aiohttp() -> None:
+    global _aiohttp_request
+    if _aiohttp_request is not None:
+        import aiohttp
+
+        aiohttp.ClientSession._request = _aiohttp_request
+        _aiohttp_request = None
+
+
+register_patcher("requests", _install_requests, _uninstall_requests, module="requests.sessions", unnamed=True)
+register_patcher("urllib", _install_urllib, _uninstall_urllib, module="urllib.request", unnamed=True)
+register_patcher("httpx", _install_httpx, _uninstall_httpx, module="httpx")
+register_patcher("aiohttp", _install_aiohttp, _uninstall_aiohttp, module="aiohttp")

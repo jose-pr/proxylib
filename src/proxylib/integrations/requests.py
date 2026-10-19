@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from .. import _net
 from ..exceptions import MissingExtraError
-from ..proxy import _PAC_RESULT, Proxy, ProxyMap, _normalise, lookup
+from ..proxy import Proxy, ProxyMap, _is_chain, _normalise, lookup
 from .dict import ProxyDict
 
 __all__ = ("ProxyMapAdapter",)
@@ -146,10 +146,6 @@ def _build_adapter_class() -> type:
 
     return ProxyMapAdapter
 
-
-def _is_chain(value: str) -> bool:
-    """A proxies value that is a PAC result, not a proxy URL."""
-    return ";" in value or _PAC_RESULT.match(value) is not None
 
 
 def __getattr__(name: str) -> Any:

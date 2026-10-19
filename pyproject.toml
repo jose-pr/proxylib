@@ -23,9 +23,9 @@ classifiers = [
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
-dependencies = ["netimps>=0.4.0,<0.5"]
+dependencies = ["netimps>=0.4.0,<0.5", "importpatch>=0.2.1,<0.3"]
 [project.optional-dependencies]
-dev = ['build', 'twine', 'hatchling', 'pytest', 'requests', 'httpx', 'importpatch>=0.2,<0.3']
+dev = ['build', 'twine', 'hatchling', 'pytest', 'requests', 'httpx', 'aiohttp']
 # PAC-as-JS engines (proxylib.pac.engines). "pac" is the preferred engine;
 # "dukpy" is the pure-wheel alternative for platforms quickjs does not build on.
 pac = [
@@ -33,17 +33,15 @@ pac = [
     'quickjs-ng; python_version >= "3.10"',
 ]
 dukpy = ['dukpy']
-# proxylib.integrations.httpx: ProxyTransport / AsyncProxyTransport.
-httpx = ['httpx>=0.26,<1']
-# proxylib's requests/urllib integration in every program that imports them,
-# through the entry points below.
-patch = ['importpatch>=0.2,<0.3']
 docs = ['mkdocs', 'mkdocs-material', 'mkdocstrings[python]']
 
-# Read only when importpatch is installed (the "patch" extra).
+# proxylib's client integrations, in every program that imports the client
+# (PROXYLIB_IMPORTPATCH chooses which use auto_proxy()).
 [project.entry-points.importpatch]
 requests = "proxylib.integrations.autopatch"
 "urllib.request" = "proxylib.integrations.autopatch"
+httpx = "proxylib.integrations.autopatch"
+aiohttp = "proxylib.integrations.autopatch"
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/proxylib/"

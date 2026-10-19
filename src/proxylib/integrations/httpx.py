@@ -1,4 +1,4 @@
-"""``httpx`` integration (the ``proxylib[httpx]`` extra).
+"""``httpx`` integration (needs ``httpx``; there is no proxylib extra for it).
 
 ``ProxyTransport`` and ``AsyncProxyTransport`` resolve the proxy for every
 request from a proxy map and fail over along its answer. httpx has no global
@@ -28,7 +28,7 @@ def _placeholder(name: str) -> type:
         _placeholder = True
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            raise MissingExtraError(name, name="httpx", extra="httpx")
+            raise MissingExtraError(name, name="httpx")
 
     Placeholder.__name__ = Placeholder.__qualname__ = name
     return Placeholder

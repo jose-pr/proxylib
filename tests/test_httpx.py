@@ -95,7 +95,7 @@ def test_async_without_failover_raises(http_server, dead_port, no_proxy_env):
         asyncio.run(main())
 
 
-def test_without_httpx_constructing_a_transport_names_the_extra():
+def test_without_httpx_constructing_a_transport_names_it():
     code = (
         "import sys; sys.modules['httpx'] = None\n"
         "import proxylib\n"
@@ -105,4 +105,17 @@ def test_without_httpx_constructing_a_transport_names_the_extra():
     )
     env = dict(os.environ, PYTHONPATH=str(pathlib.Path(__file__).resolve().parents[1] / "src"))
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, env=env)
-    assert result.stdout.strip() == "httpx httpx", result.stderr
+    assert result.stdout.strip() == "None httpx", result.stderr
+
+
+def test_the_httpx_patch_target_gives_plain_clients_the_transport(http_server, dead_port, no_proxy_env):
+    from proxylib import _net, patch
+
+    http_server.route("/ok", b"fine")
+    with patch(SimpleProxyMap(f"PROXY 127.0.0.1:{dead_port}; DIRECT"), targets=["httpx"]):
+        with httpx.Client() as client:
+            assert type(client._transport).__name__ == "ProxyTransport"
+            assert client.get(http_server.url("/ok")).text == "fine"
+        with httpx.Client(transport=httpx.HTTPTransport()) as client:
+            assert type(client._transport).__name__ == "HTTPTransport"
+    assert ("127.0.0.1", dead_port) in _net._circuit_breaker

@@ -1,5 +1,5 @@
 """patch() handles, the active map, register_patcher, the built-in requests and
-urllib targets, and PROXYLIB_AUTO_PATCH in fresh interpreters."""
+urllib targets, and PROXYLIB_IMPORTPATCH in fresh interpreters."""
 
 import importlib.metadata
 import os
@@ -103,7 +103,7 @@ def _client(tmp_path, monkeypatch, name):
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.delitem(sys.modules, name, raising=False)
     calls = []
-    register_patcher(name, calls.append, lambda: calls.append("uninstalled"), module=name)
+    register_patcher(name, calls.append, lambda: calls.append("uninstalled"), module=name, unnamed=True)
     return calls
 
 
@@ -186,7 +186,7 @@ def test_urllib_gets_the_handler_when_no_opener_was_installed():
 ADAPTER = "type(requests.Session().get_adapter('http://x/')).__name__"
 
 
-@pytest.mark.parametrize("importpatch_disable", ["1", "0"], ids=["own-hook", "importpatch"])
+@pytest.mark.parametrize("importpatch_disable", ["1", "0"], ids=["entry-points-off", "entry-points-on"])
 def test_clients_are_patched_whether_imported_before_or_after_proxylib(importpatch_disable):
     code = "import {}, {}; import urllib.request as u; print({}, u._opener is not None)"
     for first, second in (("proxylib", "requests"), ("requests", "proxylib")):
@@ -194,7 +194,7 @@ def test_clients_are_patched_whether_imported_before_or_after_proxylib(importpat
         assert (result.returncode, result.stdout.split(), result.stderr) == (0, ["ProxyMapAdapter", "True"], "")
 
 
-def test_auto_patch_off_installs_nothing_until_patch_is_called():
+def test_importpatch_off_installs_nothing_until_patch_is_called():
     result = _run(
         f"""
         import urllib.request, proxylib, requests
@@ -202,20 +202,49 @@ def test_auto_patch_off_installs_nothing_until_patch_is_called():
         proxylib.patch(proxylib.SimpleProxyMap("DIRECT"))
         print({ADAPTER})
         """,
-        PROXYLIB_AUTO_PATCH="0",
+        PROXYLIB_IMPORTPATCH="0",
     )
     assert result.stdout.split() == ["HTTPAdapter", "None", "ProxyMapAdapter"], result.stderr
 
 
-def test_auto_patch_on_uses_auto_proxy():
-    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_AUTO_PATCH="1")
-    assert result.stdout.strip() == "<auto_proxy()>", result.stderr
+@pytest.mark.parametrize(
+    "value, auto",
+    [
+        ("1", {"requests", "urllib", "httpx", "aiohttp"}),
+        ("TRUE", {"requests", "urllib", "httpx", "aiohttp"}),
+        ("", set()),
+        ("requests, urllib.request httpx", {"requests", "urllib", "httpx"}),
+        ("aiohttp,,", {"aiohttp"}),
+    ],
+)
+def test_importpatch_names_the_clients_that_use_auto_proxy(value, auto):
+    code = "import proxylib.patching as p; print(' '.join(t for t in p.targets() if repr(p.active(t)) == '<auto_proxy()>'))"
+    result = _run(code, PROXYLIB_IMPORTPATCH=value)
+    assert set(result.stdout.split()) == auto, result.stderr
 
 
-def test_a_bad_auto_patch_value_warns_and_keeps_the_default():
-    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_AUTO_PATCH="maybe")
-    assert result.stdout.strip() == "<no proxylib opinion>"
-    assert "PROXYLIB_AUTO_PATCH" in result.stderr
+def test_an_unknown_name_warns():
+    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_IMPORTPATCH="requests,pycurl")
+    assert result.stdout.strip() == "<auto_proxy()>"
+    assert "PROXYLIB_IMPORTPATCH names 'pycurl'" in result.stderr
+
+
+HTTPX = "type(httpx.Client()._transport).__name__"
+
+
+def test_httpx_is_patched_only_when_named():
+    for value, expected in (("", "HTTPTransport"), ("httpx", "ProxyTransport"), ("1", "ProxyTransport")):
+        result = _run(f"import proxylib, httpx; print({HTTPX})", PROXYLIB_IMPORTPATCH=value)
+        assert result.stdout.strip() == expected, (value, result.stderr)
+    result = _run(f"import proxylib, httpx; print(type(httpx.Client(transport=httpx.HTTPTransport())._transport).__name__)",
+                  PROXYLIB_IMPORTPATCH="httpx")
+    assert result.stdout.strip() == "HTTPTransport", result.stderr
+
+
+def test_aiohttp_is_patched_only_when_named():
+    code = "import proxylib, aiohttp; print(getattr(aiohttp.ClientSession._request, '__wrapped__', None) is not None)"
+    assert _run(code).stdout.strip() == "False"
+    assert _run(code, PROXYLIB_IMPORTPATCH="aiohttp").stdout.strip() == "True"
 
 
 def test_a_program_opener_is_left_alone():
@@ -241,7 +270,7 @@ def _entry_points_installed():
     return any(ep.value.startswith("proxylib.") for ep in group)
 
 
-@pytest.mark.skipif(not _entry_points_installed(), reason="needs proxylib installed with the patch extra")
-def test_the_patch_extra_patches_programs_that_never_import_proxylib():
+@pytest.mark.skipif(not _entry_points_installed(), reason="needs proxylib installed (its entry points)")
+def test_entry_points_patch_programs_that_never_import_proxylib():
     result = _run(f"import requests, sys; print({ADAPTER}, 'proxylib' in sys.modules)")
     assert result.stdout.split() == ["ProxyMapAdapter", "True"], result.stderr

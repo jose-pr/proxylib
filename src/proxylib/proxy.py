@@ -313,6 +313,12 @@ def lookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]":
     return _normalise(answer)
 
 
+def _is_chain(value: str) -> bool:
+    """A client's proxy setting that is a PAC result (``"PROXY a:1; DIRECT"``),
+    not a proxy URL; the client integrations resolve and fail over along it."""
+    return ";" in value or _PAC_RESULT.match(value) is not None
+
+
 async def alookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]":
     """:func:`lookup` for asyncio code, run in a worker thread: a PAC script,
     a download or an OS resolver may block. Same answer and errors."""
