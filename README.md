@@ -38,7 +38,9 @@ failover along the list a PAC returns. Documentation:
   elsewhere.
 - **Patched clients that behave as before** — `requests` and `urllib` get proxylib's
   integration as they are imported, choosing exactly the proxy they always did until
-  you `patch()` a map in (nestable) or name them in `PROXYLIB_IMPORTPATCH`.
+  you `patch()` a map in (nestable) or name them in `PROXYLIB_IMPORTPATCH`. httpx,
+  aiohttp and pip (`PROXYLIB_IMPORTPATCH=pip`: pip follows the OS settings and PAC, while
+  `pip --proxy` still wins) are patched only when named.
 - **Bypass rules in each OS's syntax** — `NO_PROXY` (curl), Windows `ProxyOverride`,
   macOS `ExceptionsList`, GNOME `ignore-hosts`, KDE `NoProxyFor`: suffixes, globs, IPv4
   and IPv6 CIDR, ports, `<local>`, `<subnet>`.

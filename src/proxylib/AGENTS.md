@@ -370,17 +370,23 @@ Each client gets proxylib's integration **once**, and it always asks the client'
 - `"httpx"` — `httpx.Client`/`AsyncClient` made without `transport`, `proxy`,
   `proxies` or `mounts` get a `ProxyTransport`/`AsyncProxyTransport`;
 - `"aiohttp"` — `ClientSession` requests without a `proxy=` (or with a proxylib value
-  as `proxy=`) take it from the active map, with failover.
+  as `proxy=`) take it from the active map, with failover;
+- `"pip"` — pip's vendored requests (`pip._vendor.requests`): every HTTP adapter pip
+  mounts routes as `ProxyMapAdapter` does (failover, gateways, proxy headers), for a
+  session that trusts the environment. `pip --proxy` and `--no-proxy-env` turn
+  `trust_env` off, and pip then chooses as it always does; pip's TLS context (truststore)
+  reaches the proxied connections unchanged.
 
 **When.** As each client is imported, in any program of the environment:
-proxylib's importpatch entry points (`requests`, `urllib.request`, `httpx`, `aiohttp`
-= `proxylib.integrations.autopatch`) run at interpreter start, and `import proxylib`
+proxylib's importpatch entry points (`requests`, `urllib.request`, `httpx`, `aiohttp`,
+`pip._vendor.requests` = `proxylib.integrations.autopatch`) run at interpreter start, and `import proxylib`
 registers the same hooks, patching clients already imported at once. Importing
 proxylib never imports a client. **Which, and with what default**, is
 `PROXYLIB_IMPORTPATCH` (read as each client is imported; see Environment variables):
 named targets use `auto_proxy()`; unnamed `requests` and `urllib` are installed with a
 default that has **no opinion**, so they choose their proxy exactly as without proxylib;
-unnamed `httpx` and `aiohttp` are not installed (their integration would change that).
+unnamed `httpx`, `aiohttp` and `pip` are not installed (their integration would change
+that).
 
 - `patch(proxymap, *, targets=None)` — makes `proxymap` the active map of every client
   in `targets` (default: all registered) until undone, installing the integration of
@@ -551,7 +557,7 @@ None of them subclasses `KeyError`: `KeyError` from a map always means "no opini
 - `NO_PROXY` / `no_proxy` — bypass rules in the `no_proxy` dialect.
 - `PROXYLIB_IMPORTPATCH` — which clients use `auto_proxy()` when imported (Patching
   clients): `1`/`true`/`yes`/`on` for every target, or target names separated by `:`
-  (`requests:httpx`; a module name such as `urllib.request` works too); an
+  (`requests:httpx`, `pip`; a module name such as `urllib.request` works too); an
   unknown name warns. Unset or empty: none named. `0`/`false`/`no`/`off`: nothing is
   installed until `patch()`.
 - `PROXYLIB_JS_ENGINE` — PAC engine priority, comma-separated (`dukpy,quickjs`); an

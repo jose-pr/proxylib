@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The `pip` patch target: with `PROXYLIB_IMPORTPATCH=pip` (or `patch(m, targets=["pip"])`),
+  pip's vendored requests routes every request through the active map — the OS settings,
+  a PAC file, failover along a `PROXY a; PROXY b` answer, gateways and proxy headers —
+  through an importpatch entry point on `pip._vendor.requests`. `pip --proxy` and
+  `--no-proxy-env` keep pip's own choice, and pip's TLS context is left as it is.
+  `PROXYLIB_IMPORTPATCH=1` includes it.
+
 ## [2.0.0] - 2026-10-19
 
 2.0 breaks the 1.x API. The [migration guide](https://jose-pr.github.io/proxylib/migration-2.0/)
