@@ -381,12 +381,20 @@ Each client gets proxylib's integration **once**, and it always asks the client'
 proxylib's importpatch entry points (`requests`, `urllib.request`, `httpx`, `aiohttp`,
 `pip._vendor.requests` = `proxylib.integrations.autopatch`) run at interpreter start, and `import proxylib`
 registers the same hooks, patching clients already imported at once. Importing
-proxylib never imports a client. **Which, and with what default**, is
-`PROXYLIB_IMPORTPATCH` (read as each client is imported; see Environment variables):
-named targets use `auto_proxy()`; unnamed `requests` and `urllib` are installed with a
-default that has **no opinion**, so they choose their proxy exactly as without proxylib;
-unnamed `httpx`, `aiohttp` and `pip` are not installed (their integration would change
-that).
+proxylib never imports a client. **Which** is `PROXYLIB_IMPORTPATCH` (unset: every
+built-in target), and **with what default** is `PROXYLIB_AUTOPROXY` (unset: none); both
+are read as each client is imported (see Environment variables).
+
+- **Default: no opinion.** The client chooses its proxy exactly as without proxylib,
+  except for a value it cannot read itself — a PAC result (`"PROXY a:3128; PROXY b:3128;
+  DIRECT"`) or a gateway (`prefix+https://gw/fetch/`) in a proxy variable, in requests'
+  `proxies`, or in aiohttp's `proxy=` — which proxylib reads, honouring `NO_PROXY`, with
+  failover where the client allows it. A PAC file location in a variable is not read
+  here (clients take `http://host/path` as a proxy); `auto_proxy()` reads it. httpx gets
+  proxylib's transport only when it has something to read (such a variable, or a map with
+  an opinion active when the client is made); otherwise the client is httpx's own.
+- **`PROXYLIB_AUTOPROXY`: `auto_proxy()`.** The proxy variables (every proxylib format,
+  PAC locations included), then the OS resolver and settings, PAC and WPAD.
 
 - `patch(proxymap, *, targets=None)` — makes `proxymap` the active map of every client
   in `targets` (default: all registered) until undone, installing the integration of
@@ -399,9 +407,11 @@ that).
 - `unpatch()` — ends every patch; every client is back on its default. Installed
   integrations stay.
 - `register_patcher` — a client integration: `install(proxymap)` is called once, when
-  module `module` has been imported and the target is wanted (named, patched from
-  code, or `unnamed=True` for an integration that keeps the client's behaviour while
-  its map has no opinion), with a map that always answers as the active map does;
+  module `module` has been imported and the target is wanted (named in
+  `PROXYLIB_IMPORTPATCH` or `PROXYLIB_AUTOPROXY`, patched from code, or — with
+  `PROXYLIB_IMPORTPATCH` unset — `unnamed=True`, for an integration that keeps the
+  client's behaviour while its map has no opinion), with a map that always answers as
+  the active map does;
   `uninstall()` removes it. An existing `name` raises `ValueError` unless
   `replace=True`.
 
@@ -555,11 +565,14 @@ None of them subclasses `KeyError`: `KeyError` from a map always means "no opini
   whole PAC result (`PROXY a:3128; SOCKS5 b:1080; DIRECT`), tried in order; or a
   gateway (`prefix+https://gw.example/fetch/`).
 - `NO_PROXY` / `no_proxy` — bypass rules in the `no_proxy` dialect.
-- `PROXYLIB_IMPORTPATCH` — which clients use `auto_proxy()` when imported (Patching
-  clients): `1`/`true`/`yes`/`on` for every target, or target names separated by `:`
-  (`requests:httpx`, `pip`; a module name such as `urllib.request` works too); an
-  unknown name warns. Unset or empty: none named. `0`/`false`/`no`/`off`: nothing is
-  installed until `patch()`.
+- `PROXYLIB_IMPORTPATCH` — which clients get proxylib's integration when imported
+  (Patching clients). Unset or empty: every built-in target (and each registered with
+  `unnamed=True`); `1`/`true`/`yes`/`on`: every registered target; target names
+  separated by `:` (`requests:httpx`, `pip`; a module name such as `urllib.request` works
+  too); `0`/`false`/`no`/`off`: none until `patch()`. An unknown name warns.
+- `PROXYLIB_AUTOPROXY` — which installed clients use `auto_proxy()` instead of their own
+  choice: the same forms; unset, empty or `0`: none. A client named here is installed
+  (unless `PROXYLIB_IMPORTPATCH=0`).
 - `PROXYLIB_JS_ENGINE` — PAC engine priority, comma-separated (`dukpy,quickjs`); an
   unknown name raises `ValueError`.
 - `IMPORTPATCH_DISABLE`, `IMPORTPATCH_CONFIG`, `IMPORTPATCH_SYSTEM_CONFIG` — importpatch's
@@ -569,18 +582,19 @@ None of them subclasses `KeyError`: `KeyError` from a map always means "no opini
 
 ## Gotchas
 
-- `import proxylib` installs the requests and urllib integrations (behaviour-preserving
-  unless `PROXYLIB_IMPORTPATCH` names them) and an import hook; with proxylib installed,
-  importpatch's start-up hook does the same in programs that never import proxylib.
-  `PROXYLIB_IMPORTPATCH=0` turns it off.
+- `import proxylib` installs the client integrations (behaviour-preserving unless
+  `PROXYLIB_AUTOPROXY` names the client) and an import hook; with proxylib installed,
+  importpatch's start-up hook does the same in programs that never import proxylib,
+  pip included. `PROXYLIB_IMPORTPATCH=0` turns it off.
 - A map is not a context manager: `with m:` raises `TypeError`. Use
   `contextlib.closing(m)` to close one at the end of a block, or `with patch(m):` to
   make it the clients' map for the block.
 - A PAC script runs in a helper process: loading costs a Python start-up (about 0.1 s),
   `functions=` must be importable, and the helper lives until `close()` or garbage
   collection.
-- `httpx` and `aiohttp` take no environment proxies once proxylib decides: chain
-  `EnvProxyConfig()` into the map, and keep aiohttp's `trust_env` off (with it on, a
-  DIRECT answer uses the environment's proxy).
+- `httpx` and `aiohttp` take no environment proxies once a map of yours decides: chain
+  `EnvProxyConfig()` into the map. A `ProxySession` used without the aiohttp target
+  installed (`PROXYLIB_IMPORTPATCH` leaving it out) needs `trust_env` off, or a DIRECT
+  answer uses the environment's proxy.
 - `ProxyMap` is structural: `isinstance("text", ProxyMap)` is true. Use `ProxyMap(src)`
   to build a map from a configured value.
