@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Work toward 2.0, which breaks the 1.x API.
+2.0 breaks the 1.x API. The [migration guide](https://jose-pr.github.io/proxylib/migration-2.0/)
+maps every removed or renamed 1.x name to its 2.0 form.
 
 ### Added
 
@@ -51,14 +52,19 @@ Work toward 2.0, which breaks the 1.x API.
   restores `a` after the inner block), `undo()` ends one, and `unpatch()` ends all.
   `patching.active(target)` is the map a client uses now; `patching.targets()` lists
   the clients.
-- Importing proxylib gives `requests` (new sessions) and `urllib` (its default opener,
-  when the program has not installed its own) proxylib's adapter and handler. Until
+- Client patching: `requests` (new sessions) and `urllib` (its default opener, when the
+  program has not installed its own) get proxylib's adapter and handler as they are
+  imported, in any program of the environment, through proxylib's
+  [importpatch](https://pypi.org/project/importpatch/) entry points (importpatch is a
+  dependency; `IMPORTPATCH_DISABLE=1` or `pyimportpatch.cfg` turn that part off). Until
   `patch()` is called they choose the proxy exactly as the client would on its own.
-  `PROXYLIB_AUTO_PATCH=1` makes `auto_proxy()` the default; `PROXYLIB_AUTO_PATCH=0`
-  installs nothing until `patch()`.
-- The `patch` extra (`importpatch`) installs that integration whenever `requests` or
-  `urllib.request` is imported, in any program of the environment, through the
-  `importpatch` entry point `proxylib.integrations.autopatch`.
+- `PROXYLIB_IMPORTPATCH`: `1` for every client, or client names separated by `:`
+  (`requests:httpx`), makes those clients use `auto_proxy()`; `0` installs nothing until
+  `patch()`. `httpx` (`Client`/`AsyncClient` built without a transport, proxy or mounts)
+  and `aiohttp` (`ClientSession` requests without `proxy=`) are patch targets too,
+  installed only when named or patched from code.
+- `close()` on every built-in map: it frees what the map owns (a PAC helper process, an OS
+  session) and closes the maps it wraps or chains.
 - Failover: `ProxyMapAdapter(proxymap, failover=True, bad_proxy_ttl=300.0)` tries an
   answer's entries in order, healthy ones first; an entry that fails before the request
   is sent (refused or timed-out connection) is skipped for `bad_proxy_ttl` seconds and
@@ -69,8 +75,10 @@ Work toward 2.0, which breaks the 1.x API.
   importing proxylib installs); a plain proxy URL stays requests' own.
 - `proxylib.integrations.httpx`: `ProxyTransport` and `AsyncProxyTransport` for
   `httpx.Client(transport=...)` / `httpx.AsyncClient(transport=...)`, with the same
-  failover; the `httpx` extra installs httpx.
+  failover (httpx itself is not a dependency).
 - `alookup(proxymap, url)`: `lookup()` for asyncio code, run in a worker thread.
+- `proxylib.integrations.aiohttp.ProxySession`: wraps an `aiohttp.ClientSession`, taking
+  each request's `proxy=` from a proxy map, with the same failover.
 - The system backends log their decisions at DEBUG on the `proxylib.system` logger.
 
 ### Changed
@@ -109,7 +117,8 @@ Work toward 2.0, which breaks the 1.x API.
   a domain whose PAC fails to run.
 - proxylib now depends on `netimps>=0.4.0,<0.5` for host:port handling, local
   interfaces (real prefix lengths on every OS, no extra needed), bounded name
-  lookups and TCP probes. `import proxylib` imports neither it nor `requests`.
+  lookups and TCP probes, and on `importpatch>=0.2.1,<0.3` for post-import hooks.
+  `import proxylib` imports importpatch, but neither netimps nor `requests`.
 - Extras: `proxylib[pac]` installs the quickjs engine and `proxylib[dukpy]` the
   dukpy one; `jspac`, `quickjs` and `ifaddr` are gone.
 - `ProxyMapAdapter` is always a class: constructing it without `requests`
@@ -118,9 +127,10 @@ Work toward 2.0, which breaks the 1.x API.
   patches stack. A patch now also reaches sessions created before it (the adapter asks
   the active map on every request). With no `targets` a missing client is skipped;
   naming it raises `MissingExtraError`.
-- `register_patcher(name, install, uninstall, *, module, replace=False)`: `install`
-  runs once when `module` is imported and receives a map that follows the active
-  patch; registering an existing name raises `ValueError` unless `replace=True`.
+- `register_patcher(name, install, *, uninstall, module, unnamed=False, replace=False)`:
+  `install` runs once when `module` is imported (and the target is wanted) and receives a
+  map that follows the active patch; registering an existing name raises `ValueError`
+  unless `replace=True`.
 - `ProxyMapHandler`: when the map has no opinion, the request uses
   `urllib.request.getproxies()` for its scheme, as the standard handler does (it went
   DIRECT). `ProxyMapAdapter` passes a `proxies` mapping of any type through (a
@@ -147,6 +157,15 @@ Work toward 2.0, which breaks the 1.x API.
   so the module imports on every OS.
 - External programs (`scutil`, `gsettings`, `nmcli`, `dbus-send`) run through one
   helper: no stdin, `LC_ALL=C`, UTF-8 output, 5 s limit.
+
+### Security
+
+- A PAC script runs in a separate helper process with a time limit per call (and a
+  memory limit with quickjs): a hostile or broken script can no longer hang or exhaust
+  the program.
+- WPAD runs only when the OS has auto-detection switched on (or `wpad=True` is passed),
+  so a network that answers for `wpad.<domain>` cannot choose the proxy of a machine
+  that never asked for auto-detection.
 
 ### Removed
 

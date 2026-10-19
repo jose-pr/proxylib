@@ -6,4 +6,6 @@
 
 ::: proxylib.integrations.httpx
 
+::: proxylib.integrations.aiohttp
+
 ::: proxylib.integrations.dict
