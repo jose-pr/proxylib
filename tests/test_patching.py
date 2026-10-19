@@ -190,7 +190,12 @@ ADAPTER = "type(requests.Session().get_adapter('http://x/')).__name__"
 def test_clients_are_patched_whether_imported_before_or_after_proxylib(importpatch_disable):
     code = "import {}, {}; import urllib.request as u; print({}, u._opener is not None)"
     for first, second in (("proxylib", "requests"), ("requests", "proxylib")):
-        result = _run(code.format(first, second, ADAPTER), IMPORTPATCH_DISABLE=importpatch_disable)
+        # urllib3 2 warns on import under a Python built with LibreSSL (Apple's python3).
+        result = _run(
+            code.format(first, second, ADAPTER),
+            IMPORTPATCH_DISABLE=importpatch_disable,
+            PYTHONWARNINGS="ignore:::urllib3",
+        )
         assert (result.returncode, result.stdout.split(), result.stderr) == (0, ["ProxyMapAdapter", "True"], "")
 
 
