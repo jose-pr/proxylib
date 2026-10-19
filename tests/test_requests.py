@@ -235,3 +235,11 @@ def test_a_plain_proxy_url_in_proxies_is_left_to_requests(http_server, dead_port
     with _session(ProxyMapAdapter(_NoOpinion())) as session, pytest.raises(requests.exceptions.ProxyError):
         session.get(http_server.url("/ok"), proxies={"http": f"http://127.0.0.1:{dead_port}"}, timeout=10)
     assert len(tried) == 1
+
+
+def test_the_adapter_takes_send_arguments_by_position(http_server, no_proxy_env):
+    # As cachecontrol's adapter passes them: request, stream, timeout, verify, cert, proxies.
+    http_server.route("/positional", b"ok")
+    adapter = ProxyMapAdapter(SimpleProxyMap("DIRECT"))
+    prepared = requests.Request("GET", http_server.url("/positional")).prepare()
+    assert adapter.send(prepared, False, 10, True, None, {}).text == "ok"
