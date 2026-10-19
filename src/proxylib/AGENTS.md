@@ -59,9 +59,12 @@ async alookup(proxymap: ProxyMap, url: str) -> tuple[Proxy | None, ...]
 an OS resolver may block. Same answer and errors.
 
 ```python
-Proxy(scheme, host, port=None, username=None, password=None)
+Proxy(scheme, host, port=None, username=None, password=None, *, path=None, headers=None)
 Proxy.parse(text) -> Proxy
 Proxy.parse_pac_result(text) -> tuple[Proxy | None, ...]
+proxy.headers -> dict[str, str]          # a new dict each read
+proxy.is_gateway -> bool
+proxy.gateway_url(target) -> str
 ```
 
 One proxy: immutable, hashable, picklable. `scheme` is lower-cased (`"proxy"` →
@@ -70,10 +73,29 @@ One proxy: immutable, hashable, picklable. `scheme` is lower-cased (`"proxy"` �
 `scheme://host[:port]` without credentials (IPv6 bracketed; `str()` is the same);
 `.uri()` adds the credentials, percent-encoded; `repr()` shows `password='***'`.
 `parse` reads a proxy URL (scheme-less = `http`, `[::1]:8080` for IPv6; a path other
-than `/` raises `ProxyParseError` — that is a PAC location). `parse_pac_result` reads
-a `FindProxyForURL` result: keywords case-insensitive (`DIRECT`, `PROXY`, `HTTP`,
-`HTTPS`, `SOCKS` = `socks4`, `SOCKS4`, `SOCKS5`); an entry with an unknown keyword or
-no host is dropped with a `UserWarning`; nothing usable is `(None,)`.
+than `/` raises `ProxyParseError` — that is a PAC location, except on a gateway).
+`parse_pac_result` reads a `FindProxyForURL` result: keywords case-insensitive
+(`DIRECT`, `PROXY`, `HTTP`, `HTTPS`, `SOCKS` = `socks4`, `SOCKS4`, `SOCKS5`, and
+proxylib's own `PREFIX <http(s) URL>` for a gateway); an entry with an unknown keyword
+or no host is dropped with a `UserWarning`; nothing usable is `(None,)`.
+
+**Proxy headers.** `headers` (a mapping or pairs) are sent to that proxy only: in the
+`CONNECT` of a tunnel, and on a plain-http request to it — never through the tunnel to
+the server. Use them for a credential that is not user/password (`{"Proxy-Authorization":
+"Bearer …"}`) or one under another header name (`{"X-Proxy-Token": "…"}`). Names must be
+HTTP tokens and values free of CR/LF, else `ProxyParseError`; a SOCKS proxy takes none.
+They count in equality and hashing (names case-insensitive); `repr()` shows the names
+with `'***'`; `.url` and `.uri()` never include them. No text form carries them: build
+the `Proxy` in code.
+
+**URL-prefix gateways.** Schemes `prefix+http` and `prefix+https`, with a `path`
+(default `/`; an absolute path, no query), name a gateway that fetches a URL appended to
+its own: the request for `T` is sent directly to `gateway_url(T)` =
+`<http|https>://host[:port]<path>T`, the target as given. Write one as
+`prefix+https://gw.example/fetch/`, or `PREFIX https://gw.example/fetch/` in a PAC
+result; `.url` keeps the `prefix+` scheme and the path. A gateway's credentials go as a
+Basic `Proxy-Authorization` header of that request, with its `headers`. Health marks
+and probes use its host and port (`443` for `prefix+https`).
 
 ```python
 ProxyMap                     # runtime_checkable Protocol: __getitem__(url) only
@@ -163,7 +185,10 @@ A proxy map read from an environment mapping: `env=None` reads `os.environ`, any
 other mapping is read instead (`{}` reads nothing). It takes every `<scheme>_proxy`,
 `all_proxy` and `no_proxy` (see Environment variables). `proxies` (scheme or `"all"`
 → `Proxy`, proxy URL, or PAC location loaded on first use) is applied over the
-environment's; `no_proxy` (`BypassRules` or `NO_PROXY` text) replaces it. Lookup:
+environment's; `no_proxy` (`BypassRules` or `NO_PROXY` text) replaces it. A value may
+also be a whole PAC result — `HTTP_PROXY="PROXY a:3128; SOCKS5 b:1080; DIRECT"` answers
+those three entries, in order, for failover — or a gateway
+(`HTTPS_PROXY=prefix+https://gw.example/fetch/`). Lookup:
 bypassed → `(None,)`; else the scheme's proxy (`ws` falls back to `http`, `wss` to
 `https`); else `"all"`; else `KeyError` (no opinion — the environment cannot say
 DIRECT). A key that is not a URL raises `ProxyParseError`; `repr()` hides passwords.
@@ -370,6 +395,22 @@ unnamed `httpx` and `aiohttp` are not installed (their integration would change 
 
 ## Client integrations (`proxylib.integrations`)
 
+**What each client can use.** Every integration takes an answer's entries in order and
+skips the ones its client cannot use, logging each at DEBUG on `proxylib.integrations`;
+an answer with nothing usable left (DIRECT always is) raises `UnsupportedProxyError`
+instead of sending the request somewhere else.
+
+| | requests | httpx | aiohttp | urllib | `ProxyDict` |
+| --- | --- | --- | --- | --- | --- |
+| HTTP proxy | yes | yes | yes | yes | yes |
+| SOCKS proxy | with `requests[socks]` | with `httpx[socks]` | no | no | yes |
+| Proxy `headers` | yes | yes | yes | `Proxy-Authorization` only, for https URLs | no |
+| URL-prefix gateway | yes | yes | no | no | no |
+
+Through a gateway (requests, httpx) the response keeps the original request and URL, so
+cookies and relative redirects belong to the target, and each redirect goes through the
+gateway again.
+
 **Failover and health** (requests, httpx, aiohttp): an answer is a list tried in order,
 healthy entries first. An entry that fails **before the request is sent** (the proxy,
 or for DIRECT the server, refuses or times out connecting) is marked bad for
@@ -383,20 +424,22 @@ ProxyMapAdapter(proxymap, *args, failover=True, bad_proxy_ttl=300.0, **kwargs)  
 
 A `requests.adapters.HTTPAdapter` subclass hooking `send()`, so it sees the real
 request URL. Looking the name up imports requests; constructing it without requests
-raises `MissingExtraError`. A caller's `proxies` entry at the `scheme://hostname` key
-requests reads first still wins; a less specific key (bare `"http"`, or one requests
-adds from the environment) does not. When the map has no opinion, requests decides
-from its `proxies` as usual — but a proxylib value there (a PAC result such as
-`"PROXY a:1; DIRECT"`, a list of proxies, a `Proxy`, or a `ProxyDict` as the whole
-`proxies`) is resolved and failed over; a plain proxy URL stays requests' own. SOCKS
-proxies need `requests[socks]`.
+raises `MissingExtraError`. A `ProxyDict` given as the whole `proxies`, and a caller's
+`proxies` entry at the `scheme://hostname` key requests reads first, win over the map
+(the caller's entry is sent as is, without failover); a less specific key (bare
+`"http"`, or one requests adds from the environment) does not. When the map has no
+opinion, requests decides from its `proxies` as usual — but a proxylib value there (a
+PAC result such as `"PROXY a:1; DIRECT"`, a list of proxies, or a `Proxy`) is resolved
+and failed over; a plain proxy URL stays requests' own.
 
 ```python
 ProxyMapHandler(proxymap)                                                         # .urllib
 ```
 
 A `urllib.request.ProxyHandler` subclass resolving per request. It uses the healthiest
-entry and does not fail over (urllib cannot re-send a request through another proxy).
+usable entry and does not fail over (urllib cannot re-send a request through another
+proxy). A proxy's headers are added unredirected; for an https URL only
+`Proxy-Authorization` is usable, since urllib moves only that one into the `CONNECT`.
 DIRECT falls through to the non-proxying handler; no opinion uses the proxy
 `urllib.request.getproxies()` names for the scheme, as the standard handler would.
 
@@ -426,15 +469,18 @@ and send with `proxy=`; the result is awaitable, or an `async with` context that
 releases the response. Fails over on `aiohttp.ClientConnectorError` (which includes
 `ClientProxyConnectionError`) and connect timeouts. No opinion → the request goes as
 aiohttp would send it; a proxylib value as `proxy=` is resolved instead of the map.
-`close()`, or `async with`. aiohttp has HTTP proxies only. Constructing one without
-aiohttp raises `MissingExtraError`.
+A proxy's headers go as `proxy_headers` for an https URL (aiohttp sends those in the
+`CONNECT` only) and join the request's headers for a plain-http one, which goes to the
+proxy. `close()`, or `async with`. Constructing one without aiohttp raises
+`MissingExtraError`.
 
 ```python
 ProxyDict(proxymap)                                                               # .dict
 ```
 
 Duck-types the `{scheme_or_url: "proxy://uri"}` dict requests-like libraries accept,
-by scheme and host only (path-dependent PAC rules do not apply). DIRECT, and a key
+by scheme and host only (path-dependent PAC rules do not apply). The value is the first
+entry a URL string can name (no gateway, no headers). DIRECT, and a key
 that is not a URL (`"http"`, `"all"`), raise `KeyError`; `setdefault` is a no-op
 (requests calls it to merge the environment's proxies; the map wins). Composes a map;
 it is not one (`__getitem__` returns `str`).
@@ -475,6 +521,9 @@ map keeps its own (`.clear()`).
   loaded as a script.
 - `NoReachableProxyError(ProxylibError, LookupError)` — no offered proxy accepted a
   connection (`Probed`).
+- `UnsupportedProxyError(ProxylibError)` — a client integration was offered only
+  entries its client cannot use (see Client integrations); `.client`, `.proxies` and
+  `.reasons` say which and why.
 - `MissingExtraError(ProxylibError, ImportError)` — an optional dependency is not
   installed; `.extra` is the proxylib extra (or `None` for a client library), `.name`
   the missing module; the message gives the `pip install` line.
@@ -488,7 +537,9 @@ None of them subclasses `KeyError`: `KeyError` from a map always means "no opini
   its uppercase form. Inside a CGI request (`REQUEST_METHOD` set) an uppercase
   `HTTP_PROXY` is ignored (httpoxy); with `os.environ` on Windows, whose names are
   case-insensitive, `http_proxy` is then ignored too. A value may be a PAC location (a
-  `file:` URL, or an `http(s)` URL with a path beyond `/`), loaded on first use.
+  `file:` URL, or an `http(s)` URL with a path beyond `/`), loaded on first use; a
+  whole PAC result (`PROXY a:3128; SOCKS5 b:1080; DIRECT`), tried in order; or a
+  gateway (`prefix+https://gw.example/fetch/`).
 - `NO_PROXY` / `no_proxy` — bypass rules in the `no_proxy` dialect.
 - `PROXYLIB_IMPORTPATCH` — which clients use `auto_proxy()` when imported (Patching
   clients): `1`/`true`/`yes`/`on` for every target, or target names separated by `:`

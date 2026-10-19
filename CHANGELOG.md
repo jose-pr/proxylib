@@ -80,6 +80,20 @@ maps every removed or renamed 1.x name to its 2.0 form.
 - `proxylib.integrations.aiohttp.ProxySession`: wraps an `aiohttp.ClientSession`, taking
   each request's `proxy=` from a proxy map, with the same failover.
 - The system backends log their decisions at DEBUG on the `proxylib.system` logger.
+- Proxy headers: `Proxy(..., headers={"X-Proxy-Token": "..."})` (or a
+  `Proxy-Authorization` value such as a Bearer token) is sent to that proxy only — in
+  the `CONNECT` of a tunnel and on a plain-http request to it, never to the server.
+  `repr()` hides the values.
+- URL-prefix gateways: `prefix+http(s)://host[:port]/path/` (`Proxy(..., path=...)`), or
+  `PREFIX https://gw/path/` in a PAC result, sends the request for a URL directly to
+  `<gateway><URL>`; requests and httpx keep the target as the response's URL, so cookies
+  and redirects belong to it.
+- `UnsupportedProxyError`: each client integration skips the entries its client cannot
+  use (gateways and SOCKS for aiohttp and urllib; for urllib, headers other than
+  `Proxy-Authorization` on https URLs; gateways and headers for `ProxyDict`) and raises
+  this when nothing usable is left.
+- A proxy variable may hold a whole PAC result: `HTTP_PROXY="PROXY a:3128; SOCKS5
+  b:1080; DIRECT"` is tried in that order.
 
 ### Changed
 
@@ -131,6 +145,9 @@ maps every removed or renamed 1.x name to its 2.0 form.
   `install` runs once when `module` is imported (and the target is wanted) and receives a
   map that follows the active patch; registering an existing name raises `ValueError`
   unless `replace=True`.
+- `ProxyMapAdapter`: a `ProxyDict` given as `proxies` wins over the adapter's map, as a
+  caller's `scheme://hostname` entry does; such an entry is sent as given, without
+  failing over along the map's answer.
 - `ProxyMapHandler`: when the map has no opinion, the request uses
   `urllib.request.getproxies()` for its scheme, as the standard handler does (it went
   DIRECT). `ProxyMapAdapter` passes a `proxies` mapping of any type through (a

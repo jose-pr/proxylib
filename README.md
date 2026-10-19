@@ -30,6 +30,12 @@ failover along the list a PAC returns. Documentation:
 - **Clients with failover** — `requests`, `httpx`, `aiohttp` and `urllib` resolve the
   proxy from the real request URL; a `PROXY a; PROXY b; DIRECT` answer is a failover
   list, and a proxy that refuses or times out connecting is skipped for 5 minutes.
+- **Proxy headers and URL-prefix gateways** — a `Proxy` can carry headers sent to that
+  proxy only (a Bearer token, or a credential under another header name), and
+  `prefix+https://gw/fetch/` (`PREFIX https://gw/fetch/` in a PAC result) names a
+  gateway fetching `<gateway><URL>`. A client skips the entries it cannot use and raises
+  `UnsupportedProxyError` when none is left, instead of leaking a header or going
+  elsewhere.
 - **Patched clients that behave as before** — `requests` and `urllib` get proxylib's
   integration as they are imported, choosing exactly the proxy they always did until
   you `patch()` a map in (nestable) or name them in `PROXYLIB_IMPORTPATCH`.
@@ -214,7 +220,10 @@ Moving from 1.x: [migration guide](https://jose-pr.github.io/proxylib/migration-
   re-send a request through the next one; use `Probed(proxymap)`, or requests, httpx or
   aiohttp. Failover happens only for errors before the request is sent.
 - **SOCKS proxies need the client's SOCKS support**: `requests[socks]` for requests,
-  `httpx[socks]` for httpx; aiohttp speaks HTTP proxies only.
+  `httpx[socks]` for httpx; aiohttp and urllib speak HTTP proxies only.
+- **Gateways work with requests and httpx only**; aiohttp and urllib skip them. urllib
+  sends only a `Proxy-Authorization` proxy header for https URLs (it would send any
+  other through the tunnel), so it skips a proxy with other headers there.
 
 ## Development
 
