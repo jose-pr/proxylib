@@ -62,7 +62,7 @@ def test_a_session_that_does_not_trust_the_environment_is_left_to_pip(
     assert recording_proxy.seen == []
 
 
-def test_the_pip_target_is_not_installed_unless_named(recording_proxy, http_server, no_proxy_env):
+def test_a_patch_that_leaves_pip_out_does_not_route_it(recording_proxy, http_server, no_proxy_env):
     http_server.route("/direct", b"direct")
     with proxylib.patch(SimpleProxyMap(f"PROXY 127.0.0.1:{recording_proxy.port}"), targets=["requests"]):
         with PipSession() as session:
@@ -85,9 +85,9 @@ def test_pip_download_follows_a_proxy_variable_pip_cannot_read_itself(
     tmp_path, recording_proxy, dead_port, no_proxy_env
 ):
     chain = f"PROXY 127.0.0.1:{dead_port}; PROXY 127.0.0.1:{recording_proxy.port}"
-    without = _pip_download(tmp_path, HTTP_PROXY=chain)
+    without = _pip_download(tmp_path, HTTP_PROXY=chain, PROXYLIB_IMPORTPATCH="requests")
     assert recording_proxy.seen == [], without.stderr
-    _pip_download(tmp_path, HTTP_PROXY=chain, PROXYLIB_IMPORTPATCH="pip")
+    _pip_download(tmp_path, HTTP_PROXY=chain)
     assert INDEX + "somepkg/" in _targets(recording_proxy)
 
 
@@ -96,7 +96,7 @@ def test_pip_proxy_option_wins_over_the_map(tmp_path, recording_proxy, gateway, 
         tmp_path,
         "--proxy", f"http://127.0.0.1:{gateway.port}",
         HTTP_PROXY=f"PROXY 127.0.0.1:{recording_proxy.port}",
-        PROXYLIB_IMPORTPATCH="pip",
+        PROXYLIB_AUTOPROXY="pip",
     )
     assert INDEX + "somepkg/" in _targets(gateway), result.stderr
     assert recording_proxy.seen == []

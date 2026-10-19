@@ -1,5 +1,5 @@
-"""Wire proxy maps into HTTP clients: ``requests``, ``urllib``, ``httpx`` and
-``aiohttp`` built in, others through :func:`register_patcher`.
+"""Wire proxy maps into HTTP clients: ``requests``, ``urllib``, ``httpx``,
+``aiohttp`` and ``pip`` built in, others through :func:`register_patcher`.
 
 Each client gets proxylib's integration once, when it is imported, in any
 program of the environment: proxylib's ``importpatch`` entry points run at
@@ -7,14 +7,19 @@ interpreter start, and importing proxylib registers the same hooks. The
 integration asks the client's *active map*: the newest :func:`patch` that
 covers it, else its default.
 
-``PROXYLIB_IMPORTPATCH`` chooses the defaults: ``1``/``true``/``yes``/``on``
-for every target, or target names separated by ``:`` (``requests:httpx``; a
-client's module name, such as ``urllib.request``, works too). A named target's default is
-:func:`~proxylib.auto_proxy`. Unset or empty, nothing is named: ``requests`` and
-``urllib`` still get the integration, with a default that has no opinion, so
-they choose their proxy exactly as without proxylib; ``httpx`` and
-``aiohttp``, whose integration would change that, get none.
-``0``/``false``/``no``/``off`` installs nothing until :func:`patch` is called.
+``PROXYLIB_IMPORTPATCH`` chooses the clients that get the integration: unset,
+every built-in one (and each registered with ``unnamed=True``);
+``1``/``true``/``yes``/``on``, every registered one; or target names separated
+by ``:`` (``requests:httpx``; a client's module name, such as
+``urllib.request``, works too); ``0``/``false``/``no``/``off``, none until
+:func:`patch` is called. Its default map has no opinion, so the client chooses
+its proxy as it always does, and proxylib only reads what the client cannot: a
+PAC result (``PROXY a:3128; PROXY b:3128; DIRECT``) or a URL-prefix gateway
+given where the client takes a proxy.
+
+``PROXYLIB_AUTOPROXY`` (the same forms; unset or ``0``, none) chooses the
+clients whose default is :func:`~proxylib.auto_proxy`: the proxy variables, the
+OS resolver and settings, PAC and WPAD. A client named there is installed.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ InstallFunc = Callable[[ProxyMap], None]
 UninstallFunc = Callable[[], None]
 
 _SETTING = "PROXYLIB_IMPORTPATCH"
+_AUTO_SETTING = "PROXYLIB_AUTOPROXY"
 # The importpatch patcher (also proxylib's entry point); it calls _on_import.
 _AUTOPATCH = "proxylib.integrations.autopatch"
 _TRUE = ("1", "true", "yes", "on")
@@ -49,8 +55,8 @@ class _Target(NamedTuple):
     module: str
     install: InstallFunc
     uninstall: UninstallFunc
-    # Installed without being named: its integration keeps the client's own
-    # behaviour under a default with no opinion.
+    # Installed by default (PROXYLIB_IMPORTPATCH unset): its integration keeps
+    # the client's own behaviour under a default with no opinion.
     unnamed: bool
 
 
@@ -63,16 +69,33 @@ _frames: "List[Patch]" = []
 
 class _Setting(NamedTuple):
     off: bool
-    named: "FrozenSet[str]"
+    # None: not set, which means the targets registered unnamed=True.
+    named: "Optional[FrozenSet[str]]"
 
 
 def _setting() -> _Setting:
     """``PROXYLIB_IMPORTPATCH``, read when a client is imported."""
     raw = os.environ.get(_SETTING, "").strip()
+    if not raw:
+        return _Setting(False, None)
     if raw.lower() in _FALSE:
         return _Setting(True, frozenset())
+    return _Setting(False, _names(_SETTING, raw))
+
+
+def _autoproxy() -> "FrozenSet[str]":
+    """``PROXYLIB_AUTOPROXY``: the targets whose default is ``auto_proxy()``."""
+    raw = os.environ.get(_AUTO_SETTING, "").strip()
+    if not raw or raw.lower() in _FALSE:
+        return frozenset()
+    return _names(_AUTO_SETTING, raw)
+
+
+def _names(variable: str, raw: str) -> "FrozenSet[str]":
+    """Every registered target for a true value, else the ``:``-separated
+    names (a client's module name works too); an unknown name warns."""
     if raw.lower() in _TRUE:
-        return _Setting(False, frozenset(_registry))
+        return frozenset(_registry)
     by_module = {target.module: name for name, target in _registry.items()}
     by_module["urllib.request"] = "urllib"
     by_module["pip._vendor.requests"] = "pip"
@@ -85,13 +108,13 @@ def _setting() -> _Setting:
         if name in _registry:
             names.add(name)
         else:
-            warnings.warn(f"{_SETTING} names {part!r}, which is not one of {', '.join(_registry)}", stacklevel=3)
-    return _Setting(False, frozenset(names))
+            warnings.warn(f"{variable} names {part!r}, which is not one of {', '.join(_registry)}", stacklevel=4)
+    return frozenset(names)
 
 
 class _NoOpinion:
-    """The default of a target not named: every lookup has no opinion, so the
-    client decides."""
+    """The default of a target not in ``PROXYLIB_AUTOPROXY``: every lookup has
+    no opinion, so the client decides."""
 
     __slots__ = ()
 
@@ -103,8 +126,8 @@ class _NoOpinion:
 
 
 class _AutoProxy:
-    """``auto_proxy()``, built on the first lookup; shared by every named
-    target."""
+    """``auto_proxy()``, built on the first lookup; shared by every target in
+    ``PROXYLIB_AUTOPROXY``."""
 
     __slots__ = ("_map", "_lock")
 
@@ -130,7 +153,7 @@ _AUTO_PROXY = _AutoProxy()
 
 
 def _default_map(target: str) -> ProxyMap:
-    return _AUTO_PROXY if target in _setting().named else _NO_OPINION
+    return _AUTO_PROXY if target in _autoproxy() else _NO_OPINION
 
 
 class _ActiveMap:
@@ -147,6 +170,12 @@ class _ActiveMap:
 
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         return lookup(active(self.target), url)
+
+    @property
+    def decides(self) -> bool:
+        """Whether a map with an opinion is active (a patch, or
+        ``auto_proxy()``), so an integration can skip asking one that has none."""
+        return active(self.target) is not _NO_OPINION
 
 
 def active(target: str) -> ProxyMap:
@@ -180,7 +209,11 @@ def _wanted(name: str) -> bool:
         if any(handle.targets is None or name in handle.targets for handle in _frames):
             return True
     setting = _setting()
-    return not setting.off and (_registry[name].unnamed or name in setting.named)
+    if setting.off:
+        return False
+    if name in _autoproxy():
+        return True
+    return _registry[name].unnamed if setting.named is None else name in setting.named
 
 
 def _on_import(module_name: str) -> None:
@@ -295,8 +328,9 @@ def register_patcher(
 ) -> None:
     """Register a client integration. ``install(proxymap)`` is called once,
     when ``module`` (the client) has been imported and the target is wanted
-    (named in ``PROXYLIB_IMPORTPATCH``, patched from code, or ``unnamed=True``:
-    an integration that keeps the client's own behaviour while its map has no
+    (named in ``PROXYLIB_IMPORTPATCH`` or ``PROXYLIB_AUTOPROXY``, patched from
+    code, or -- with ``PROXYLIB_IMPORTPATCH`` unset -- ``unnamed=True``: an
+    integration that keeps the client's own behaviour while its map has no
     opinion), with a map that always answers as the active map does;
     ``uninstall()`` removes it. An existing ``name`` raises ``ValueError``
     unless ``replace=True``."""
@@ -388,20 +422,28 @@ _httpx_inits: "List[Tuple[type, Callable]]" = []
 
 def _install_httpx(proxymap: ProxyMap) -> None:
     """``httpx.Client`` and ``AsyncClient`` made without ``transport``,
-    ``proxy``, ``proxies`` or ``mounts`` get a proxylib transport over the
-    active map; ``verify``, ``cert``, ``http1``, ``http2``, ``limits`` and
-    ``trust_env`` go to its inner transports."""
+    ``proxy``, ``proxies`` or ``mounts`` get a proxylib transport when a map
+    with an opinion is active, or when (with ``trust_env``) a proxy variable
+    holds a PAC result or a gateway, which the transport then reads; otherwise
+    the client is httpx's own. ``verify``, ``cert``, ``http1``, ``http2``,
+    ``limits`` and ``trust_env`` go to the inner transports."""
     import httpx
 
+    from .env import EnvProxyConfig
+    from .integrations._support import env_chain
     from .integrations.httpx import AsyncProxyTransport, ProxyTransport
+    from .proxy import ChainProxyMap
 
     for client_class, transport_class in ((httpx.Client, ProxyTransport), (httpx.AsyncClient, AsyncProxyTransport)):
         original = client_class.__init__
 
         def __init__(self, *args, __original=original, __transport=transport_class, **kwargs):
             if not any(kwargs.get(key) is not None for key in ("transport", "proxy", "proxies", "mounts")):
-                inner = {k: kwargs[k] for k in ("verify", "cert", "http1", "http2", "limits", "trust_env") if k in kwargs}
-                kwargs["transport"] = __transport(proxymap, **inner)
+                from_env = kwargs.get("trust_env", True) and any(env_chain(s) for s in ("http", "https", "all"))
+                if from_env or proxymap.decides:
+                    inner = {k: kwargs[k] for k in ("verify", "cert", "http1", "http2", "limits", "trust_env") if k in kwargs}
+                    source = ChainProxyMap(proxymap, EnvProxyConfig()) if from_env else proxymap
+                    kwargs["transport"] = __transport(source, **inner)
             __original(self, *args, **kwargs)
 
         __init__.__wrapped__ = original  # type: ignore[attr-defined]
@@ -415,18 +457,23 @@ def _uninstall_httpx() -> None:
         client_class.__init__ = original
 
 
-_aiohttp_request: "Optional[Callable]" = None
+_aiohttp_originals: "Optional[Tuple[Callable, Optional[Callable]]]" = None
 
 
 def _install_aiohttp(proxymap: ProxyMap) -> None:
     """``ClientSession`` requests take ``proxy=`` from the active map, with
-    failover; a proxy URL the caller gives is aiohttp's own."""
-    global _aiohttp_request
+    failover; with no opinion, a PAC result or gateway in a proxy variable
+    (``trust_env``) or in ``proxy=`` is read by proxylib, and anything else is
+    aiohttp's own. A request proxylib routed does not read the environment
+    again (so DIRECT is direct)."""
+    global _aiohttp_originals
     import aiohttp
+    import aiohttp.client as client_module
 
-    from .integrations.aiohttp import _routed
+    from .integrations.aiohttp import _ROUTED, _routed
 
     original = aiohttp.ClientSession._request
+    original_env = getattr(client_module, "get_env_proxy_for_url", None)
 
     async def _request(self, method, str_or_url, **kwargs):
         async def send(**proxy_kwargs):
@@ -439,20 +486,33 @@ def _install_aiohttp(proxymap: ProxyMap) -> None:
             kwargs.pop("proxy", None),
             proxy_headers=kwargs.pop("proxy_headers", None),
             headers=kwargs.pop("headers", None),
+            trust_env=self.trust_env,
         )
 
+    def get_env_proxy_for_url(url):
+        if _ROUTED.get():
+            raise LookupError("proxylib chose this request's proxy")
+        return original_env(url)
+
     _request.__wrapped__ = original  # type: ignore[attr-defined]
-    _aiohttp_request = original
+    _aiohttp_originals = (original, original_env)
     aiohttp.ClientSession._request = _request
+    if original_env is not None:
+        get_env_proxy_for_url.__wrapped__ = original_env  # type: ignore[attr-defined]
+        client_module.get_env_proxy_for_url = get_env_proxy_for_url
 
 
 def _uninstall_aiohttp() -> None:
-    global _aiohttp_request
-    if _aiohttp_request is not None:
+    global _aiohttp_originals
+    if _aiohttp_originals is not None:
         import aiohttp
+        import aiohttp.client as client_module
 
-        aiohttp.ClientSession._request = _aiohttp_request
-        _aiohttp_request = None
+        original, original_env = _aiohttp_originals
+        aiohttp.ClientSession._request = original
+        if original_env is not None:
+            client_module.get_env_proxy_for_url = original_env
+        _aiohttp_originals = None
 
 
 _pip_originals: "Optional[Tuple[type, Callable, Callable, type, Callable]]" = None
@@ -516,6 +576,6 @@ def _uninstall_pip() -> None:
 
 register_patcher("requests", _install_requests, uninstall=_uninstall_requests, module="requests.sessions", unnamed=True)
 register_patcher("urllib", _install_urllib, uninstall=_uninstall_urllib, module="urllib.request", unnamed=True)
-register_patcher("httpx", _install_httpx, uninstall=_uninstall_httpx, module="httpx")
-register_patcher("aiohttp", _install_aiohttp, uninstall=_uninstall_aiohttp, module="aiohttp")
-register_patcher("pip", _install_pip, uninstall=_uninstall_pip, module="pip._vendor.requests.sessions")
+register_patcher("httpx", _install_httpx, uninstall=_uninstall_httpx, module="httpx", unnamed=True)
+register_patcher("aiohttp", _install_aiohttp, uninstall=_uninstall_aiohttp, module="aiohttp", unnamed=True)
+register_patcher("pip", _install_pip, uninstall=_uninstall_pip, module="pip._vendor.requests.sessions", unnamed=True)
