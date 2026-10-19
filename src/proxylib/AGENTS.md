@@ -59,6 +59,9 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 - **`ChainProxyMap(*maps)`** — asks each map in order through `lookup`; the first
   with an opinion answers (DIRECT included). If every map has no opinion, neither
   does the chain. Links can be `dict`s.
+- **`Bypass(inner, rules)`** (`proxylib.wrappers`) — `(None,)` for a URL `rules`
+  matches (`BypassRules`, `NO_PROXY` text, or its entries; loopback included unless
+  `<-loopback>`), else `lookup(inner, url)`.
 - **`ConfigurableProxyMap(proxymap, *, cache_ttl=None, probe=False, probe_timeout=5.0,
   round_robin=False, browser_compatibility=False, bypass_local=False, no_proxy=None,
   cache_maxsize=1024)`**
@@ -125,31 +128,74 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
     environment cannot say DIRECT). A key that is not a URL raises
     `ProxyParseError`. `repr()` hides passwords.
 
-## System / auto detection (`proxylib.os`, re-exported at top level)
+## System settings (`proxylib.system`; `auto_proxy`, `system_config`, `ProxyConfig` at top level)
 
-- **`system_proxy(provider="python") -> ProxyMap | str`** — this machine's configured
-  proxy. `provider="python"` (default): proxylib's own per-OS detection (`.nt` on
-  Windows via the WinHTTP API, `.darwin` via `scutil --proxy`, `.posix` — libproxy,
-  GNOME/MATE, KDE, NetworkManager, then env vars, tried in that order). Each backend
-  respects its own OS/desktop auto-detect (WPAD) signal itself and tries it first. A
-  `str` return is a PAC URL the caller still needs to load. `provider="system"`:
-  outsources to the OS's native engine (`WinHttpProxyMap`/`CFNetworkProxyMap`/
-  `LibProxyMap`) instead — falls back to `"python"` on POSIX if libproxy's shared
-  library isn't loadable. Any other `provider` raises `ValueError`. A WinHTTP answer
-  with several proxies keeps all of them, in order.
-- **`auto_proxy(provider="python", **urlopen_kwargs) -> ProxyMap`** — resolves the full
-  effective config: `system_proxy(provider)` → if it's a PAC URL string, load it → if it
-  signals "nothing configured" (the `"python"` provider only), fall back to WPAD
-  discovery (`pac.wpad.discover`) → otherwise DIRECT. `**urlopen_kwargs` forward to the
-  PAC/WPAD HTTP fetch (e.g. `timeout=`).
-- **`LibProxyMap(lib=None)`** (`proxylib.os.posix.libproxy`, re-exported at top level) —
-  a standalone `ProxyMap` using libproxy's C API directly via `ctypes` (no subprocess).
-  Construct with no arguments to auto-detect the shared library. `__getitem__` raises
-  `KeyError` (not a construction-time error) if libproxy isn't available, and when
-  libproxy returns no answer. Keeps one `pxProxyFactory` per map, created on first
-  lookup and freed by `close()` (or garbage collection); usable directly on any
-  platform regardless of the OS dispatch above.
-
+- **`auto_proxy(*, system=True, no_proxy=None, wpad=False, timeout=10.0,
+  on_missing_engine="raise", environ=None) -> ProxyMap`** — the proxy map for this
+  machine; it answers every URL (never `KeyError`). Precedence, the same on every OS:
+  1. If any proxy variable (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, ... — any
+     `*_proxy` but `no_proxy`, non-empty) is set in `environ` (default `os.environ`),
+     the variables alone decide (`EnvProxyConfig(environ)`, as
+     `urllib.request.getproxies()` does): a scheme with no variable is DIRECT and the
+     OS is never consulted, no OS resolver is built. A variable may hold a PAC
+     location (`file:` URL or an `http(s)` URL with a path), loaded on first lookup.
+  2. Otherwise, with `system=True`, the OS's own resolver answers — `WinHTTPProxyMap`
+     on Windows, `CFNetworkProxyMap` on macOS, `LibProxyMap` elsewhere when libproxy
+     is installed — and a URL it cannot answer (`KeyError`) goes to
+     `system_config().to_proxymap(wpad=, timeout=, on_missing_engine=)`. With no OS
+     resolver, or `system=False`, only that map is used. `system=False` never calls
+     an OS resolver (libproxy included).
+  3. `no_proxy` (`BypassRules`, `NO_PROXY` text, or its entries) wraps the result:
+     matching URLs are DIRECT.
+  There is no `provider=` argument and no `PROXY_PAC` variable.
+- **`system_config() -> ProxyConfig`** — this machine's OS/desktop settings;
+  environment variables are not read. Windows: the user's Internet Options (WinHTTP
+  `WinHttpGetIEProxyConfigForCurrentUser`). macOS: `scutil --proxy`. Elsewhere: GNOME
+  (`org.gnome.system.proxy`), MATE, KDE (`kioslaverc`; `ProxyType=4` defers to the
+  environment and reads as no settings), NetworkManager (`nmcli`, else `dbus-send`) —
+  the first with a proxy configured, else the first with settings. Nothing readable →
+  `ProxyConfig()`. Programs run with a 5 s limit, no stdin and `LC_ALL=C`; any
+  failure reads as "no settings". Decisions are logged at DEBUG on the
+  `proxylib.system` logger.
+- **`ProxyConfig(source="none", state="unset", auto_detect=False, pac_url=None,
+  pac_script=None, proxies={}, bypass=BypassRules.NONE)`** — frozen dataclass.
+  - `source`: `"windows"`, `"macos"`, `"gnome"`, `"mate"`, `"kde"`,
+    `"networkmanager"` or `"none"`.
+  - `state`: `"direct"` (the settings say no proxy — Windows and macOS with nothing
+    switched on, GNOME `mode='none'`, KDE `ProxyType=0`), `"configured"`, or
+    `"unset"` (no settings to read). Anything else raises `ValueError`.
+  - `proxies`: read-only mapping from a request scheme (`http`, `https`, `ftp`) to a
+    `Proxy`, plus `"socks"` — the proxy for every scheme without its own entry. String
+    values are parsed. No cross-filling: an `https`-only setting leaves `http` DIRECT.
+    SOCKS keeps the version the OS means: Windows `socks=` is `socks4`; macOS, GNOME,
+    MATE and KDE SOCKS are `socks5`. An `https`/`ftp` entry is an HTTP proxy.
+  - `bypass`: the OS's list parsed in its dialect (`wininet`, `macos`, `gsettings`,
+    `kde`); it applies to `proxies` only (as on every OS), and loopback is always
+    bypassed.
+  - **`.to_proxymap(*, wpad=False, timeout=10.0, on_missing_engine="raise") ->
+    ProxyMap`** — `state="direct"` → DIRECT for every URL. Otherwise asks, in order:
+    WPAD (`discover_pac`), only when `auto_detect` is set or `wpad=True` with
+    `state="unset"`; the PAC at `pac_url`; `pac_script`; then `proxies` (bypass
+    first; a scheme with no entry is DIRECT). A source that fails (no WPAD server, a
+    PAC that does not download or raises `PACError`) passes to the next and is retried
+    after 30 s. Nothing is fetched until the first lookup. A missing JS engine is not
+    swallowed: `MissingExtraError` unless `on_missing_engine="direct"`. `timeout`
+    bounds each WPAD probe and PAC download.
+- **OS resolvers** (`proxylib.system`) — each answers `tuple[Proxy | None, ...]` and
+  raises `KeyError` when it cannot answer, never DIRECT for a failure:
+  - **`WinHTTPProxyMap()`** — `WinHttpGetProxyForUrl`: WinHTTP does WPAD (DHCP and
+    DNS), fetches the PAC with NTLM/Kerberos when challenged and runs it (no JS engine
+    needed); when the settings name neither, or WinHTTP fails, the manual proxies
+    answer. One session per map (10 s timeouts); `close()` releases it, after which a
+    lookup raises `KeyError`. Construction raises `OSError` off Windows. Several
+    proxies in WinHTTP's answer are kept, in order.
+  - **`CFNetworkProxyMap(deadline=5.0)`** — `CFNetworkCopyProxiesForURL`, running a
+    configured PAC natively; a PAC run longer than `deadline` seconds → `KeyError`.
+    Off macOS every lookup raises `KeyError`.
+  - **`LibProxyMap(lib=None)`** — libproxy's C API via `ctypes`; `lib` defaults to
+    the library found on the linker path. Not installed, or no answer → `KeyError`.
+    One `pxProxyFactory` per map, made on first lookup, freed by `close()` (or garbage
+    collection).
 ## PAC support (`proxylib.pac`)
 
 - **`load(location, *, timeout=10.0, cache_ttl=300.0, script_timeout=5.0, engine=None,

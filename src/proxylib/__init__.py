@@ -13,9 +13,6 @@ from .exceptions import ProxylibError as ProxylibError
 from .exceptions import ProxyParseError as ProxyParseError
 from .integrations.dict import ProxyDict as ProxyDict
 from .integrations.urllib import ProxyMapHandler as ProxyMapHandler
-from .os import auto_proxy as auto_proxy
-from .os import system_proxy as system_proxy
-from .os.posix.libproxy import LibProxyMap as LibProxyMap
 from .pac import PacProxyMap as PacProxyMap
 from .pac import PacScript as PacScript
 from .pac import load as load_pac
@@ -32,13 +29,17 @@ from .proxy import SimpleProxyMap as SimpleProxyMap
 from .proxy import ProxyAnswer as ProxyAnswer
 from .proxy import ProxyLike as ProxyLike
 from .proxy import lookup as lookup
+from .system import ProxyConfig as ProxyConfig
+from .system import auto_proxy as auto_proxy
+from .system import system_config as system_config
+from .wrappers import Bypass as Bypass
 
 __all__ = (
+    "Bypass",
     "BypassRules",
     "ChainProxyMap",
     "ConfigurableProxyMap",
     "EnvProxyConfig",
-    "LibProxyMap",
     "MissingExtraError",
     "NoReachableProxyError",
     "PacProxyMap",
@@ -46,6 +47,7 @@ __all__ = (
     "PACError",
     "Proxy",
     "ProxyAnswer",
+    "ProxyConfig",
     "ProxyDict",
     "ProxyLike",
     "ProxyMap",
@@ -62,7 +64,7 @@ __all__ = (
     "lookup",
     "patch",
     "register_patcher",
-    "system_proxy",
+    "system_config",
     "unpatch",
 )
 

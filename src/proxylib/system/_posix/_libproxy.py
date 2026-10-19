@@ -1,31 +1,17 @@
-"""libproxy integration, via ``ctypes`` bindings to its C API directly
-(no subprocess, no non-stdlib dependency).
-
-`libproxy <https://libproxy.github.io/libproxy/>`_ is itself a cross-desktop
-proxy-resolution engine -- it already knows how to read GNOME/KDE/env vars/
-PAC/WPAD/etc, generally with more fidelity than proxylib's own best-effort
-per-desktop probes (:mod:`.gnome`, :mod:`.kde`, ...). When its shared library
-is loadable, :mod:`..posix` prefers it over those probes.
-
-Unlike the other backends, this isn't a "read the config once at startup"
-detector -- resolution is per-URL, so :class:`LibProxyMap` is its own
-:class:`~proxylib.proxy.ProxyMap` implementation that calls into libproxy
-fresh for every lookup: a new ``pxProxyFactory`` per call (matching
-libproxy's own API contract -- see ``px_proxy_factory_free`` -- and
-sidestepping any question of whether a shared factory is safe to reuse
-across threads).
-"""
+"""`libproxy <https://libproxy.github.io/libproxy/>`_, the desktop-independent
+resolver on Linux, through ``ctypes`` bindings to its C API. It reads the
+desktop's settings and runs PAC and WPAD itself, per URL."""
 
 from __future__ import annotations
 
 import ctypes
 import threading
 from ctypes.util import find_library
-from typing import Iterable, Optional
+from typing import Optional, Tuple
 
 from ...proxy import Proxy, ProxyMap
 
-__all__ = ("LibProxyMap", "detect")
+__all__ = ("LibProxyMap",)
 
 
 def _load_libproxy() -> "Optional[ctypes.CDLL]":
@@ -47,10 +33,8 @@ def _load_libproxy() -> "Optional[ctypes.CDLL]":
     return lib
 
 
-# Loaded lazily on first use (and memoized): `import proxylib` shouldn't
-# scan the dynamic linker's search paths on platforms where libproxy will
-# never exist. Tests monkeypatch `_libproxy` directly, which takes
-# precedence over the lazy load.
+# Loaded on first use, so importing proxylib never searches the linker path;
+# tests set _libproxy directly.
 _UNLOADED = object()
 _libproxy: "Optional[ctypes.CDLL]" = _UNLOADED  # type: ignore[assignment]
 
@@ -63,15 +47,15 @@ def _get_libproxy() -> "Optional[ctypes.CDLL]":
 
 
 class LibProxyMap(ProxyMap):
-    """Resolves each request URL via libproxy's C API.
+    """A proxy map answered by libproxy (``px_proxy_factory_get_proxies``).
 
-    Construct with no arguments to use the auto-detected shared library;
-    ``__getitem__`` raises ``KeyError`` (like any other resolution failure)
-    if libproxy isn't available, rather than erroring at construction time.
+    ``lib`` is the loaded library; by default it is found on the linker path.
+    When libproxy is not installed, or cannot answer, a lookup has no opinion
+    (``KeyError``) rather than DIRECT.
 
-    One libproxy factory is created on first lookup and kept, so its PAC and
-    configuration caches are reused; release it with :meth:`close` (garbage
-    collection does it too).
+    One libproxy factory, made on the first lookup, serves every lookup so
+    its PAC and settings caches are reused; :meth:`close` releases it
+    (garbage collection does too).
     """
 
     __slots__ = ("_lib", "_factory", "_lock")
@@ -93,7 +77,7 @@ class LibProxyMap(ProxyMap):
         except AttributeError:  # __init__ did not finish
             pass
 
-    def __getitem__(self, uri: str) -> "Iterable[Optional[Proxy]]":
+    def __getitem__(self, uri: str) -> "Tuple[Optional[Proxy], ...]":
         lib = self._lib
         if lib is None:
             raise KeyError(uri)
@@ -118,7 +102,3 @@ class LibProxyMap(ProxyMap):
         finally:
             lib.px_proxy_factory_free_proxies(proxies_array)
 
-
-def detect() -> "Optional[LibProxyMap]":
-    lib = _get_libproxy()
-    return LibProxyMap(lib) if lib is not None else None

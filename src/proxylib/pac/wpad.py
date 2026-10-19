@@ -1,5 +1,5 @@
-"""DNS + HTTP WPAD (Web Proxy Auto-Discovery) fallback, used by ``auto_proxy()``
-when no explicit OS/env proxy configuration is found.
+"""DNS + HTTP WPAD (Web Proxy Auto-Discovery), which
+``ProxyConfig.to_proxymap()`` runs when the OS asks for auto-detection.
 
 DHCP option 252 discovery is intentionally not implemented: it needs raw
 access to the OS's DHCP lease data, which has no portable stdlib-only path.

@@ -1,22 +1,20 @@
-"""macOS system proxy detection via ``scutil --proxy`` (no extra dependency),
-plus :class:`CFNetworkProxyMap`, a ctypes binding to the native CFNetwork
-proxy-resolution API.
+"""macOS: the System Configuration proxy settings (read with ``scutil
+--proxy``), and :class:`CFNetworkProxyMap`, CFNetwork's own resolver.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
-import subprocess
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..bypass import BypassRules
-from ..env import EnvProxyConfig
-from ..pac.wpad import discover as _wpad_discover
-from ..proxy import Proxy, ProxyMap, SimpleProxyMap
+from ..proxy import Proxy, ProxyMap
+from . import _run
+from ._config import ProxyConfig, proxy_at
 
-__all__ = ("system_proxy", "CFNetworkProxyMap")
+__all__ = ("CFNetworkProxyMap", "read_config", "config_from_scutil")
 
 _kCFStringEncodingUTF8 = 0x08000100
 _kCFNumberSInt64Type = 4
@@ -48,16 +46,9 @@ def _parse_scutil_block(lines: "List[str]", pos: int) -> "Tuple[Dict[str, Any], 
 
 
 def _read_scutil_proxy() -> "Dict[str, Any]":
-    """Run and parse ``scutil --proxy`` into a nested dict; ``{}`` if unavailable."""
-    try:
-        output = subprocess.run(
-            ["scutil", "--proxy"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=True,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
+    """``scutil --proxy`` as a nested dict; ``{}`` when it cannot run."""
+    output = _run.run(["scutil", "--proxy"])
+    if output is None:
         return {}
 
     lines = [ln.rstrip() for ln in output.splitlines()]
@@ -69,70 +60,53 @@ def _read_scutil_proxy() -> "Dict[str, Any]":
     return settings
 
 
-def system_proxy() -> "Union[ProxyMap, str]":
-    """Read proxy settings from macOS's System Configuration via ``scutil --proxy``.
+# (settings key prefix, ProxyConfig key, proxy scheme). The HTTPS and FTP
+# entries are HTTP proxies for those schemes; SOCKS is v5, as Chromium reads it.
+_MANUAL = (("HTTP", "http", "http"), ("HTTPS", "https", "http"), ("FTP", "ftp", "http"), ("SOCKS", "socks", "socks5"))
 
-    Mirrors macOS's own Network preferences precedence: if "Auto Proxy
-    Discovery" (WPAD) is on, it's tried first; then Automatic Proxy
-    Configuration (a PAC URL) if enabled; then a manual HTTP/HTTPS proxy;
-    otherwise DIRECT.
-    """
-    settings = _read_scutil_proxy()
 
-    if settings.get("ProxyAutoDiscoveryEnable") == "1":
-        discovered = _wpad_discover()
-        if discovered is not None:
-            return discovered
+def config_from_scutil(settings: "Dict[str, Any]") -> "Optional[ProxyConfig]":
+    """``ExceptionsList`` is a macOS bypass list; ``ExcludeSimpleHostnames``
+    adds dotless hosts. ``None`` for no settings; any settings with nothing
+    switched on are ``state="direct"``."""
+    if not settings:
+        return None
 
-    if settings.get("ProxyAutoConfigEnable") == "1":
-        pac_url = settings.get("ProxyAutoConfigURLString")
-        if pac_url:
-            return pac_url
+    def enabled(key: str) -> bool:
+        return settings.get(key) == "1"
 
-    http_enabled = settings.get("HTTPEnable") == "1"
-    https_enabled = settings.get("HTTPSEnable") == "1"
-    http_proxy = (
-        f"http://{settings['HTTPProxy']}:{settings.get('HTTPPort', 80)}"
-        if http_enabled and settings.get("HTTPProxy")
-        else None
+    proxies = {}
+    for prefix, key, scheme in _MANUAL:
+        if enabled(f"{prefix}Enable"):
+            proxy = proxy_at(settings.get(f"{prefix}Proxy"), settings.get(f"{prefix}Port"), scheme)
+            if proxy is not None:
+                proxies[key] = proxy
+    pac_url = settings.get("ProxyAutoConfigURLString") if enabled("ProxyAutoConfigEnable") else None
+    auto_detect = enabled("ProxyAutoDiscoveryEnable")
+    exceptions = settings.get("ExceptionsList")
+    exceptions = list(exceptions) if isinstance(exceptions, list) else []
+    if enabled("ExcludeSimpleHostnames"):
+        exceptions.append("<local>")
+    return ProxyConfig(
+        source="macos",
+        state="configured" if (auto_detect or pac_url or proxies) else "direct",
+        auto_detect=auto_detect,
+        pac_url=pac_url or None,
+        proxies=proxies,
+        bypass=BypassRules.parse(exceptions, dialect="macos"),
     )
-    https_proxy = (
-        f"http://{settings['HTTPSProxy']}:{settings.get('HTTPSPort', 443)}"
-        if https_enabled and settings.get("HTTPSProxy")
-        else None
-    )
-    if http_proxy or https_proxy:
-        exceptions = list(settings.get("ExceptionsList", []))
-        if settings.get("ExcludeSimpleHostnames") == "1":
-            exceptions.append("<local>")
-        return EnvProxyConfig(
-            {},
-            proxies={"http": http_proxy or https_proxy, "https": https_proxy or http_proxy},
-            no_proxy=BypassRules.parse(exceptions, dialect="macos"),
-        )
-
-    return SimpleProxyMap()
 
 
-# ---- CFNetworkProxyMap: native CFNetwork/CoreFoundation proxy resolution -----
+def read_config() -> "Optional[ProxyConfig]":
+    return config_from_scutil(_read_scutil_proxy())
+
+
+# ---- CFNetworkProxyMap ---------------------------------------------------------
 #
-# Written against documented CFNetwork/CoreFoundation API signatures
-# (CFProxySupport.h, CFRunLoop.h); no macOS is available in this dev
-# environment, so this was validated by pushing a throwaway ci-* tag and
-# running tests/test_os.py::test_cfnetworkproxymap_real_smoke (no mocking)
-# against a real macos-latest GitHub Actions runner -- passed on Python 3.9
-# and 3.13. That smoke test only confirms
-# the happy path (DIRECT/manual proxy on a runner with nothing configured);
-# the PAC-execution/run-loop-deadline branch is still unexercised by real
-# CI and should be treated with more caution until it is.
-#
-# All ctypes/CFNetwork work is lazy (only touched inside _get_cf_bindings(),
-# called only from _resolve_proxies_for_url(), called only from
-# CFNetworkProxyMap.__getitem__()) so importing this module stays side-effect
-# free on any platform -- the same reason libproxy.py's binding is lazy, and
-# necessary here since tests import proxylib.os.darwin unconditionally on
-# every OS (see tests/test_os.py's existing darwin.py tests, none of which
-# are skipif'd to macOS-only).
+# Bindings to CFProxySupport.h and CFRunLoop.h, loaded on first lookup so the
+# module imports on every OS. tests/test_system.py's real CFNetwork smoke
+# test covers the DIRECT and manual-proxy path on a macOS runner; the PAC
+# execution path runs only where the system names a PAC.
 
 
 class _CFBindings:
@@ -220,10 +194,7 @@ def _load_cf_bindings() -> "Optional[_CFBindings]":
 
 
 def _get_cf_bindings() -> "Optional[_CFBindings]":
-    # Loaded lazily on first use (and memoized), same pattern as
-    # os/posix/libproxy.py's _get_libproxy(): don't scan for these libraries
-    # at import time on platforms where they'll never exist. Tests
-    # monkeypatch _cf_bindings directly, which takes precedence.
+    # Memoized; tests set _cf_bindings directly.
     global _cf_bindings
     if _cf_bindings is _UNLOADED:
         _cf_bindings = _load_cf_bindings()
@@ -400,23 +371,14 @@ def _resolve_proxies_for_url(url: str, deadline: float = 5.0) -> "Optional[List[
 
 
 class CFNetworkProxyMap(ProxyMap):
-    """Resolves each request URL via macOS's native CFNetwork proxy engine.
+    """A proxy map answered by macOS's resolver (``CFNetworkCopyProxiesForURL``).
 
-    Unlike :func:`system_proxy` (which reads static settings once via
-    ``scutil --proxy`` and relies on `EnvProxyConfig` for NO_PROXY-style
-    matching), ``CFNetworkCopyProxiesForURL`` applies the system's real
-    per-URL bypass-exception matching itself. When the system is configured
-    with a PAC URL, it's executed natively (``CFNetworkExecuteProxyAutoConfigurationURL``)
-    -- no ``dukpy`` needed -- pumped against a run loop in small slices up to
-    ``deadline`` seconds (default 5.0) so a dead PAC server or hung DNS
-    lookup can't block forever; on timeout, raises ``KeyError`` (a
-    resolution failure per the ``ProxyMap`` contract -- same as
-    ``LibProxyMap`` -- so a fallback/chain can proceed) rather than hanging
-    or silently returning DIRECT.
-
-    Validated by a real (unmocked) smoke test on macOS CI, but only for the
-    common "direct/manual proxy" path -- the PAC-execution/run-loop-deadline
-    branch is not yet exercised by that CI job, so treat it more cautiously.
+    CFNetwork applies the system's bypass list itself and runs a configured
+    PAC (``CFNetworkExecuteProxyAutoConfigurationURL``), so no JS engine is
+    needed. A PAC run is bounded by ``deadline`` seconds; when it overruns,
+    or CFNetwork cannot answer, the lookup has no opinion (``KeyError``)
+    rather than DIRECT, so a chain can ask the next map. macOS only: off it,
+    every lookup raises ``KeyError``.
     """
 
     __slots__ = ("deadline",)
@@ -424,7 +386,10 @@ class CFNetworkProxyMap(ProxyMap):
     def __init__(self, deadline: float = 5.0) -> None:
         self.deadline = deadline
 
-    def __getitem__(self, url: str) -> "Iterable[Optional[Proxy]]":
+    def __repr__(self) -> str:
+        return f"CFNetworkProxyMap(deadline={self.deadline!r})"
+
+    def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         entries = _resolve_proxies_for_url(url, self.deadline)
         if entries is None:
             raise KeyError(url)

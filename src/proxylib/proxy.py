@@ -400,6 +400,9 @@ class ChainProxyMap(ProxyMap):
     def __init__(self, *maps: ProxyMap) -> None:
         self.maps = maps
 
+    def __repr__(self) -> str:
+        return f"ChainProxyMap({', '.join(map(repr, self.maps))})"
+
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         for proxymap in self.maps:
             try:
@@ -518,9 +521,7 @@ class ConfigurableProxyMap(ProxyMap):
             try:
                 answer = (first_working_proxy(answer, timeout=self.probe_timeout),)
             except LookupError:
-                # No candidate was reachable -- a resolution failure, not a
-                # DIRECT decision (same reasoning as LibProxyMap/
-                # CFNetworkProxyMap's timeout/failure handling).
+                # No candidate was reachable: a failure to answer, not a DIRECT decision.
                 raise KeyError(url)
             if not self.round_robin:
                 probed = answer
