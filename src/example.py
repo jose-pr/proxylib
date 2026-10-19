@@ -10,7 +10,7 @@ from proxylib import (
     ProxyMap,
 )
 
-# Auto-detect the system/env proxy (or fall back to WPAD discovery).
+# The proxy environment variables if any is set, else the OS's settings.
 proxymap = auto_proxy()
 
 # Recommended requests integration: mount a ProxyMapAdapter so every request's

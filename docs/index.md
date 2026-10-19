@@ -23,7 +23,7 @@ pip install proxylib
 import requests
 from proxylib import auto_proxy, ProxyMapAdapter
 
-proxymap = auto_proxy()  # OS settings -> env vars -> WPAD discovery -> DIRECT
+proxymap = auto_proxy()  # proxy env vars if set, else the OS resolver and settings
 
 session = requests.Session()
 adapter = ProxyMapAdapter(proxymap)

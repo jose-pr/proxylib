@@ -16,18 +16,22 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
 
 - **Proxy string parsing** — `PROXY host:port; DIRECT`-style PAC strings, `scheme://host:port`
   URLs, and env-var-style values, all normalized into a common `Proxy` type.
-- **System proxy detection** — Windows (via the WinHTTP API), macOS (`scutil --proxy`),
-  and Linux (env vars, plus best-effort [libproxy](https://libproxy.github.io/libproxy/),
-  GNOME, MATE, KDE, and NetworkManager checks — tried in that order, first match wins).
-  `system_proxy()` respects each OS/desktop's own auto-detect (WPAD) signal —
-  "Automatically detect settings" on Windows, "Auto Proxy Discovery" on macOS, mode
-  `auto` with a blank Configuration URL on GNOME/MATE, `ProxyType=3` in KDE's
-  `kioslaverc`, or NetworkManager's `proxy.method=auto` with no PAC set — and tries
-  WPAD itself first, in that platform's own precedence order (auto-detect → PAC script
-  → manual proxy → DIRECT). NetworkManager is read via `nmcli` if installed, else
-  `dbus-send` directly. `LibProxyMap` (libproxy's own resolution, called via `ctypes`
-  bindings to its C API — no subprocess) is also available as a standalone `ProxyMap`
-  you can use directly on any platform.
+- **One precedence on every OS** — `auto_proxy()` uses the proxy environment variables
+  when any is set (as `urllib.request.getproxies()` does), else the OS: its own
+  resolver (WinHTTP on Windows, CFNetwork on macOS,
+  [libproxy](https://libproxy.github.io/libproxy/) on Linux when installed), backed by
+  the OS settings read directly.
+- **OS settings as data** — `system_config()` returns a `ProxyConfig`: the Windows
+  Internet Options (WinHTTP API), macOS System Configuration (`scutil --proxy`), or
+  GNOME, MATE, KDE and NetworkManager settings on Linux. It keeps what each OS stores:
+  per-scheme proxies, SOCKS (as the fallback for every other scheme), the PAC URL,
+  auto-detection, and the bypass list in that OS's own syntax; and it tells "the OS says
+  no proxy" apart from "there are no settings".
+- **WPAD only when asked** — auto-detection runs when the OS has it switched on
+  ("Automatically detect settings" on Windows, "Auto Proxy Discovery" on macOS, mode
+  `auto` with a blank URL on GNOME/MATE, `ProxyType=3` on KDE, NetworkManager
+  `proxy.method=auto` with no PAC) or when you pass `wpad=True` on a machine with no
+  settings — never because nothing else was found.
 - **Env var proxy config** — every `<scheme>_proxy` plus `ALL_PROXY` and `NO_PROXY`
   (lowercase wins), read from any mapping; a PAC URL may be given as a proxy value.
 - **Bypass rules in each OS's syntax** — `BypassRules` reads `NO_PROXY` (curl), the
@@ -38,10 +42,8 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
   real JavaScript (`quickjs` or `dukpy`) in a helper process with a time limit, so a
   hostile or broken PAC cannot hang your program; a Python function can stand in for
   `FindProxyForURL` too.
-- **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup. Used directly by
-  `system_proxy()` on any platform/desktop whose own auto-detect setting is on, and as
-  a generic last-resort fallback in `auto_proxy()` when nothing else is configured.
-  Results (including "no WPAD server here") are cached for 5 minutes so repeated
+- **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup, stopping before a
+  public suffix such as `co.uk`. Results (including "no WPAD server here") are cached for 5 minutes so repeated
   lookups don't re-probe the network, and DNS resolution fails fast on a hanging lookup.
 - **`requests` integration** — a `ProxyMapAdapter` Transport Adapter that resolves the
   proxy from the real request URL (not just scheme+host).
@@ -81,7 +83,7 @@ instead. With both installed, `quickjs` is preferred; set `PROXYLIB_JS_ENGINE=du
 import requests
 from proxylib import auto_proxy, ProxyMapAdapter
 
-proxymap = auto_proxy()  # OS settings -> env vars -> WPAD discovery -> DIRECT
+proxymap = auto_proxy()  # proxy env vars if set, else the OS resolver and settings
 
 session = requests.Session()
 adapter = ProxyMapAdapter(proxymap)
@@ -196,9 +198,8 @@ lookup(proxymap, "https://example.com/")  # -> (Proxy(scheme='http', host='corp-
 | `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, `ConfigurableProxyMap`, URI parsing |
 | `proxylib.patching` | `patch()` / `unpatch()` / `register_patcher()` — global patching registry |
 | `proxylib.env` | `EnvProxyConfig` — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` |
-| `proxylib.os` | `system_proxy()` / `auto_proxy()` — platform dispatch + WPAD fallback |
-| `proxylib.os.nt` / `.darwin` | Windows (WinHTTP API) / macOS (`scutil`) system proxy backends |
-| `proxylib.os.posix` | Linux dispatch: `.libproxy`, `.gnome`, `.mate`, `.kde`, `.networkmanager` |
+| `proxylib.system` | `auto_proxy()`, `system_config()`, `ProxyConfig`, and the OS resolvers `WinHTTPProxyMap`, `CFNetworkProxyMap`, `LibProxyMap` |
+| `proxylib.wrappers` | `Bypass` — maps that wrap another map |
 | `proxylib.pac` | `PacScript`, `PacProxyMap`, `load()`, `loads()`, `functions` — PAC scripts and builtins |
 | `proxylib.pac.wpad` | `discover()` — DNS+HTTP WPAD auto-discovery |
 | `proxylib.pac.engines` | `JSEngine` interface, `names()`, engine selection |
@@ -254,13 +255,12 @@ published to GitHub Pages on every release (see above). To preview locally:
 
 - **DHCP-based WPAD discovery is not implemented** — only DNS+HTTP (`wpad.<domain>/wpad.dat`).
   Reading DHCP option 252 needs raw OS lease access with no portable stdlib path.
-- **Linux desktop proxy detection** covers libproxy, GNOME/MATE (`gsettings`), KDE
-  (`kioslaverc`), and NetworkManager (`nmcli`, or `dbus-send` if `nmcli` isn't
-  installed), tried in that fixed order with no session detection to disambiguate — if
-  a machine has stale config from more than one of these, the first one with anything
-  set wins, even if it isn't the active desktop. Xfce, Cinnamon, and other desktop
-  environments aren't covered directly (though libproxy, if installed, may cover them)
-  — set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` or `PROXY_PAC` explicitly otherwise.
+- **Linux desktop settings** are read from GNOME/MATE (`gsettings`), KDE
+  (`kioslaverc`) and NetworkManager (`nmcli`, or `dbus-send` if `nmcli` isn't
+  installed) with no session detection: the first with a proxy configured wins, even
+  if it isn't the active desktop. Xfce, Cinnamon and other desktops are covered only
+  through libproxy, if installed — otherwise set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
+  (a proxy variable may name a PAC file).
 - The NetworkManager `dbus-send` fallback path scrapes `dbus-send`'s
   debug-oriented text output for the specific fields it needs; it hasn't been verified
   against a live NetworkManager D-Bus session, only a best-effort reconstruction of the

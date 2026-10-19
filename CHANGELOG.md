@@ -38,6 +38,14 @@ Work toward 2.0, which breaks the 1.x API.
   (including `ReversedException`); IPv6 CIDR works. The OS backends now read their
   own bypass lists with their own syntax (a WinINet `*.corp;10.*` list, a macOS
   `*.local`, a KDE reversed list).
+- `system_config()` returns a `ProxyConfig`: the OS or desktop settings as data
+  (`source`, `state` = `"direct"`/`"configured"`/`"unset"`, `auto_detect`, `pac_url`,
+  `pac_script`, per-scheme `proxies` plus a `"socks"` fallback, and `bypass`).
+  `ProxyConfig.to_proxymap()` builds the map: WPAD, then the PAC, then the proxies,
+  each passing to the next when it fails.
+- `Bypass(inner, rules)` (`proxylib.wrappers`) answers DIRECT for the URLs `rules`
+  match.
+- The system backends log their decisions at DEBUG on the `proxylib.system` logger.
 
 ### Changed
 
@@ -85,6 +93,27 @@ Work toward 2.0, which breaks the 1.x API.
   installed; with no `targets` a missing client is skipped, and naming it
   raises `MissingExtraError`.
 - WPAD and PAC `dnsResolve` lookups are bounded by a timeout.
+- `auto_proxy(*, system=True, no_proxy=None, wpad=False, timeout=10.0,
+  on_missing_engine="raise", environ=None)`. The proxy environment variables come
+  first on every OS: when any is set they alone decide, and the OS is not consulted
+  (Windows and macOS ignored them before; Linux desktops outranked them). Otherwise
+  the OS's own resolver answers by default (WinHTTP, CFNetwork, libproxy when
+  installed), backed by the OS settings for a URL it cannot answer; `system=False`
+  uses only the settings, and libproxy is never used there.
+- WPAD runs only when the OS has auto-detection switched on, or with `wpad=True`
+  on a machine with no settings. An OS that says "no proxy" is final; 1.x ran WPAD
+  whenever nothing was configured.
+- SOCKS-only and per-protocol OS settings are kept: a Windows `socks=` entry (SOCKS
+  v4) or a macOS/GNOME/KDE SOCKS proxy (v5) serves every scheme without its own
+  proxy, and an `https`-only proxy no longer serves `http` URLs (or the reverse).
+  FTP proxies are read too.
+- On Linux, the first desktop with a proxy configured wins, so another desktop's
+  `mode='none'` default no longer hides KDE's settings.
+- `proxylib.os` is now `proxylib.system`, with private per-OS modules;
+  `WinHttpProxyMap` is `WinHTTPProxyMap`. The WinHTTP bindings load on first use,
+  so the module imports on every OS.
+- External programs (`scutil`, `gsettings`, `nmcli`, `dbus-send`) run through one
+  helper: no stdin, `LC_ALL=C`, UTF-8 output, 5 s limit.
 
 ### Removed
 
@@ -93,11 +122,17 @@ Work toward 2.0, which breaks the 1.x API.
   `pac.engines.get_engine_class()`: use `PacProxyMap` with a `PacScript` or a
   Python function, `proxylib.clear_caches()` and `pac.engines.get_engine()`.
 - `set_default_no_proxy()` / `get_default_no_proxy()`: pass bypass rules where a
-  map is built (`EnvProxyConfig(no_proxy=...)`, `ConfigurableProxyMap(no_proxy=...)`).
+  map is built (`auto_proxy(no_proxy=...)`, `EnvProxyConfig(no_proxy=...)`,
+  `Bypass(proxymap, rules)`).
 - `UriSplit`, `Proxy.from_str`, `Proxy.find_all` and `Proxy.as_uri`: use
   `Proxy.parse`, `Proxy.parse_pac_result` and `Proxy.uri`.
 - `proxylib.netutils` and the top-level `first_working_proxy`; use
   `ConfigurableProxyMap(probe=True)` for reachability probing.
+- `system_proxy()` and `auto_proxy(provider=...)`: use `system_config()` and
+  `auto_proxy(system=...)`. The `PROXY_PAC` variable: give the PAC location in
+  `HTTP_PROXY` and the other proxy variables. `LibProxyMap` is no longer exported
+  at top level (`proxylib.system.LibProxyMap`), and the per-desktop `detect()`
+  functions are gone.
 
 ## [1.1.0] - 2026-10-18
 
