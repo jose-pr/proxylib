@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-19
+
 2.0 breaks the 1.x API. The [migration guide](https://jose-pr.github.io/proxylib/migration-2.0/)
 maps every removed or renamed 1.x name to its 2.0 form.
 
@@ -578,7 +580,8 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/jose-pr/proxylib/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/jose-pr/proxylib/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/jose-pr/proxylib/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/jose-pr/proxylib/compare/v1.0.0...v1.0.1
