@@ -15,8 +15,8 @@ name starts with `_` are private.
 `pip install proxylib` (Python 3.9+). Two dependencies, neither with dependencies of
 its own: `netimps` (network helpers) and `importpatch` (post-import hooks). Extras:
 `pac` installs the quickjs JavaScript engine for PAC scripts (`quickjs-ng` on Python
-3.10+, `quickjs` on 3.9) and `dukpy` the dukpy engine (the one with a Windows ARM64
-wheel). The client integrations need no extra: each works when its client
+3.10+, `quickjs` on 3.9) and `dukpy` the dukpy engine (the one with Windows ARM64 and
+Intel macOS wheels). The client integrations need no extra: each works when its client
 (`requests`, `httpx`, `aiohttp`) is installed. `import proxylib` imports importpatch,
 but not netimps, a JS engine or any client.
 
@@ -388,7 +388,8 @@ requests reads first still wins; a less specific key (bare `"http"`, or one requ
 adds from the environment) does not. When the map has no opinion, requests decides
 from its `proxies` as usual — but a proxylib value there (a PAC result such as
 `"PROXY a:1; DIRECT"`, a list of proxies, a `Proxy`, or a `ProxyDict` as the whole
-`proxies`) is resolved and failed over; a plain proxy URL stays requests' own.
+`proxies`) is resolved and failed over; a plain proxy URL stays requests' own. SOCKS
+proxies need `requests[socks]`.
 
 ```python
 ProxyMapHandler(proxymap)                                                         # .urllib

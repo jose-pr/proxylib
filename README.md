@@ -53,7 +53,7 @@ its own.
 | Extra | Adds | Needed for |
 | --- | --- | --- |
 | `proxylib[pac]` | `quickjs-ng` (Python 3.10+) / `quickjs` (3.9) | Running PAC files (preferred engine) |
-| `proxylib[dukpy]` | `dukpy` | The dukpy engine, for platforms without a quickjs wheel (Windows ARM64) |
+| `proxylib[dukpy]` | `dukpy` | The dukpy engine, for platforms without a quickjs wheel (Windows ARM64, Intel macOS) |
 
 The `requests`, `httpx` and `aiohttp` integrations need no extra: each works when its
 client is installed. Without a JS engine, loading a PAC raises `MissingExtraError`
@@ -213,7 +213,8 @@ Moving from 1.x: [migration guide](https://jose-pr.github.io/proxylib/migration-
 - **urllib does not fail over** — `ProxyMapHandler` uses the healthiest entry but cannot
   re-send a request through the next one; use `Probed(proxymap)`, or requests, httpx or
   aiohttp. Failover happens only for errors before the request is sent.
-- **aiohttp speaks HTTP proxies only** (no SOCKS); httpx needs `httpx[socks]` for them.
+- **SOCKS proxies need the client's SOCKS support**: `requests[socks]` for requests,
+  `httpx[socks]` for httpx; aiohttp speaks HTTP proxies only.
 
 ## Development
 
