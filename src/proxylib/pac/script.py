@@ -96,7 +96,7 @@ class _Runner:
         with self._lock:
             try:
                 _child.write_frame(self._proc.stdin, message)  # type: ignore[arg-type]
-            except OSError as exc:
+            except (OSError, ValueError) as exc:  # ValueError: the pipe was closed
                 raise PACError(f"the PAC helper process is gone: {exc}") from exc
             return self._wait_reply(timeout)
 
@@ -118,9 +118,14 @@ class _Runner:
 
     def close(self) -> None:
         proc = getattr(self, "_proc", None)
-        if proc is not None and proc.poll() is None:
+        if proc is None:
+            return
+        if proc.poll() is None:
             proc.kill()
             proc.wait()
+        for pipe in (proc.stdin, proc.stdout):
+            if pipe is not None:
+                pipe.close()
 
 
 class PacScript:
