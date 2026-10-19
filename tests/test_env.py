@@ -1,262 +1,166 @@
 import os
+import warnings
 
 import pytest
 
-from proxylib import Proxy
-from proxylib.env import EnvProxyConfig, get_default_no_proxy, set_default_no_proxy
+from proxylib import BypassRules, EnvProxyConfig, Proxy, ProxyParseError, lookup
 
 
-@pytest.fixture(autouse=True)
-def clear_default_no_proxy():
-    set_default_no_proxy(None)
-    yield
-    set_default_no_proxy(None)
+def _env(**names):
+    return EnvProxyConfig(names)
 
 
-def test_env_selects_http_vs_https_proxy():
-    cfg = EnvProxyConfig("http://httpproxy:80", "http://httpsproxy:80", [])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://httpproxy:80")]
-    assert list(cfg["https://example.com"]) == [Proxy.from_str("http://httpsproxy:80")]
+def test_selects_the_proxy_for_the_scheme():
+    cfg = EnvProxyConfig({}, proxies={"http": "http://httpproxy:80", "https": "http://httpsproxy:80"})
+    assert cfg["http://example.com"] == (Proxy.parse("http://httpproxy:80"),)
+    assert cfg["https://example.com"] == (Proxy.parse("http://httpsproxy:80"),)
 
 
-def test_no_proxy_exact_and_subdomain_match():
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com"])
-    assert cfg["https://example.com"] == [None]
-    assert cfg["https://api.example.com"] == [None]
+def test_unconfigured_scheme_is_no_opinion():
+    cfg = EnvProxyConfig({}, proxies={"https": "http://p:1"})
+    with pytest.raises(KeyError):
+        cfg["http://example.com/"]
 
 
-def test_no_proxy_does_not_match_lookalike_domain():
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com"])
-    assert list(cfg["https://evilexample.com"]) == [Proxy.from_str("http://proxy:80")]
+def test_all_proxy_covers_every_scheme():
+    cfg = _env(ALL_PROXY="socks5://s:1080")
+    assert cfg["http://x/"] == (Proxy("socks5", "s", 1080),)
+    assert cfg["ftp://x/"] == (Proxy("socks5", "s", 1080),)
 
 
-def test_no_proxy_leading_dot_entry():
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", [".example.com"])
-    assert cfg["https://api.example.com"] == [None]
-    assert cfg["https://example.com"] == [None]
+def test_scheme_proxy_wins_over_all_proxy():
+    cfg = _env(all_proxy="http://all:1", https_proxy="http://tls:1")
+    assert cfg["https://x/"][0].host == "tls"
+    assert cfg["http://x/"][0].host == "all"
 
 
-def test_no_proxy_port_specific_entry():
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com:8080"])
-    assert cfg["http://example.com:8080"] == [None]
-    assert list(cfg["http://example.com:80"]) == [Proxy.from_str("http://proxy:80")]
+def test_any_scheme_proxy_variable_is_read():
+    assert _env(ftp_proxy="http://f:21")["ftp://x/"][0].host == "f"
 
 
-def test_no_proxy_cidr_matches_ip_literal():
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["10.0.0.0/8"])
-    assert cfg["http://10.1.2.3"] == [None]
-    assert list(cfg["http://11.0.0.1"]) == [Proxy.from_str("http://proxy:80")]
+def test_websockets_use_the_http_proxies():
+    cfg = _env(http_proxy="http://plain:1", https_proxy="http://tls:1")
+    assert cfg["ws://x/"][0].host == "plain"
+    assert cfg["wss://x/"][0].host == "tls"
 
 
-def test_no_proxy_cidr_ipv6_entry_parses_correctly():
-    # IPv6 CIDRs contain ":" -- must be parsed as a network via the "/" before
-    # the existing rpartition(":") host:port split runs, or the ":" inside
-    # the address would be mangled into a bogus port split. (proxylib's own
-    # URL parser doesn't yet support bracketed IPv6 literal hosts, so this is
-    # checked at the entry-parsing level rather than through a full request.)
-    import ipaddress
-
-    from proxylib.env import _parse_no_proxy_entry
-
-    assert _parse_no_proxy_entry("2001:db8::/32") == ipaddress.ip_network("2001:db8::/32")
+def test_lowercase_wins_over_uppercase():
+    assert _env(HTTP_PROXY="http://upper:1", http_proxy="http://lower:1")["http://x/"][0].host == "lower"
+    assert _env(NO_PROXY="upper.test", no_proxy="lower.test").no_proxy.matches("http://lower.test/")
 
 
-def test_no_proxy_cidr_does_not_match_hostname_without_resolving(monkeypatch):
-    import proxylib.env as env
-
-    def boom(host):
-        raise AssertionError("DNS resolution attempted for a CIDR NO_PROXY entry")
-
-    monkeypatch.setattr(env, "get_ip", boom)
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["10.0.0.0/8"])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
+def test_scheme_less_values_are_http_proxies():
+    assert _env(https_proxy="proxy:3128")["https://x/"] == (Proxy("http", "proxy", 3128),)
 
 
-def test_default_no_proxy_is_merged_in():
-    set_default_no_proxy(["example.com"])
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", [])
-    assert cfg["https://example.com"] == [None]
+def test_trailing_slash_value_is_a_proxy():
+    assert _env(http_proxy="http://proxy:8080/")["http://x/"] == (Proxy("http", "proxy", 8080),)
 
 
-def test_default_no_proxy_does_not_override_explicit_rules():
-    set_default_no_proxy(["other.com"])
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["example.com"])
-    assert cfg["https://example.com"] == [None]
-    assert cfg["https://other.com"] == [None]
+def test_pac_location_value_is_loaded_on_first_lookup(monkeypatch):
+    import proxylib.pac as pac
+    from proxylib import SimpleProxyMap
+
+    loaded = []
+    monkeypatch.setattr(pac, "load", lambda src: loaded.append(src) or SimpleProxyMap("PROXY a:1"))
+    cfg = _env(HTTP_PROXY="http://wpad.corp/proxy.pac")
+    assert loaded == []
+    assert cfg["http://x/"][0].host == "a"
+    assert loaded == ["http://wpad.corp/proxy.pac"]
 
 
-def test_get_default_no_proxy_returns_a_copy():
-    set_default_no_proxy(["example.com"])
-    rules = get_default_no_proxy()
-    rules.append("mutated.com")
-    assert get_default_no_proxy() == ["example.com"]
-
-
-def test_no_proxy_local_bypasses_loopback():
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>"])
-    assert cfg["http://127.0.0.1"] == [None]
-
-
-def test_no_proxy_local_bypasses_link_local():
-    # 169.254/16 is inherently non-routable beyond the local link -- bypass
-    # it even without a matching local interface subnet (shared helper with
-    # ConfigurableProxyMap's bypass_local=).
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>"])
-    assert cfg["http://169.254.1.1"] == [None]
-
-
-def test_env_accepts_trailing_slash_proxy_urls():
-    # The common HTTP_PROXY="http://proxy:8080/" shape must build a plain
-    # proxy map -- it used to be misrouted into the PAC loader (network I/O
-    # from the constructor, then failure).
-    cfg = EnvProxyConfig("http://proxy:8080/", "http://sproxy:443/", [])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:8080")]
-    assert list(cfg["https://example.com"]) == [Proxy.from_str("http://sproxy:443")]
-
-
-def test_env_does_not_resolve_dns_without_local_entry(monkeypatch):
-    import proxylib.env as env
-
-    def boom(host):
-        raise AssertionError("DNS resolution attempted without a <local> entry")
-
-    monkeypatch.setattr(env, "get_ip", boom)
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["other.com"])
-    assert list(cfg["http://example.com"]) == [Proxy.from_str("http://proxy:80")]
-
-
-def test_no_proxy_star_bypasses_everything():
-    # curl, requests.utils.should_bypass_proxies and the stdlib's
-    # proxy_bypass_environment all read a bare "*" as "bypass every host".
-    # This used to parse to a ("*", None) host entry that matched nothing,
-    # so a configured proxy was still returned.
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["*"])
-    assert cfg["https://example.com"] == [None]
-    assert cfg["http://10.1.2.3:8080"] == [None]
+def test_no_proxy_bypasses():
+    cfg = _env(http_proxy="http://p:1", no_proxy="example.com, 10.0.0.0/8")
+    assert cfg["http://api.example.com/"] == (None,)
+    assert cfg["http://10.2.3.4/"] == (None,)
+    assert cfg["http://other.test/"][0].host == "p"
 
 
 def test_no_proxy_star_bypasses_even_with_no_proxy_configured():
-    # The wildcard is an explicit DIRECT decision, not "no opinion" -- it must
-    # not fall through to the KeyError an unconfigured scheme would give.
-    cfg = EnvProxyConfig(None, None, ["*"])
-    assert cfg["https://example.com"] == [None]
+    assert _env(NO_PROXY="*")["http://example.com/"] == (None,)
 
 
-def test_no_proxy_star_short_circuits_before_local_dns(monkeypatch):
-    # "<local>" resolves DNS; "*" makes that irrelevant, so a "<local>" entry
-    # ordered ahead of the wildcard must not still charge the lookup a
-    # blocking gethostbyname().
-    import proxylib.env as env
-
-    def boom(host):
-        raise AssertionError("DNS resolved despite a '*' NO_PROXY entry")
-
-    monkeypatch.setattr(env, "get_ip", boom)
-    cfg = EnvProxyConfig("http://proxy:80", "http://proxy:80", ["<local>", "*"])
-    assert cfg["http://example.com"] == [None]
+def test_no_proxy_accepts_bypass_rules():
+    rules = BypassRules.parse("*.corp", dialect="wininet")
+    cfg = EnvProxyConfig({}, proxies={"all": "http://p:1"}, no_proxy=rules)
+    assert cfg["http://a.corp/"] == (None,)
 
 
-def test_no_proxy_star_entry_parses_to_the_wildcard_sentinel():
-    from proxylib.env import _WILDCARD, _parse_no_proxy_entry
-
-    assert _parse_no_proxy_entry("*") is _WILDCARD
-    assert _parse_no_proxy_entry(" * ") is _WILDCARD
-    # Only a bare "*" is the wildcard -- "*.example.com" stays a host entry
-    # (and keeps its old, unchanged behavior).
-    assert _parse_no_proxy_entry("*.example.com") != _WILDCARD
+def test_malformed_no_proxy_entry_warns_and_does_not_raise():
+    with pytest.warns(UserWarning, match="10.0.0.0/33"):
+        cfg = _env(http_proxy="http://p:1", NO_PROXY="10.0.0.0/33, example.com")
+    assert cfg["http://example.com/"] == (None,)
 
 
-def test_from_env_star_no_proxy(monkeypatch):
-    # Clear every casing before setting one: on Windows os.environ is
-    # case-insensitive, so a later delenv of the other casing would silently
-    # undo the setenv.
-    monkeypatch.delenv("NO_PROXY", raising=False)
-    monkeypatch.delenv("no_proxy", raising=False)
-    monkeypatch.delenv("HTTP_PROXY", raising=False)
-    monkeypatch.delenv("http_proxy", raising=False)
-    monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    monkeypatch.delenv("https_proxy", raising=False)
-    monkeypatch.setenv("HTTP_PROXY", "http://proxy:80")
-    monkeypatch.setenv("NO_PROXY", "*")
-
-    cfg = EnvProxyConfig.from_env()
-    assert cfg["http://example.com"] == [None]
-    assert cfg["https://anything.internal"] == [None]
-
-
-def test_no_proxy_star_reaches_configurable_proxy_map():
-    # ConfigurableProxyMap doesn't reimplement bypass matching -- it delegates
-    # to an internal EnvProxyConfig(None, None, rules), so the wildcard has to
-    # work through that seam too.
-    from proxylib import ConfigurableProxyMap, SimpleProxyMap
-
-    cfg = ConfigurableProxyMap(SimpleProxyMap("http://proxy:80"), no_proxy=["*"])
-    assert list(cfg["https://example.com"]) == [None]
-
-
-def test_default_no_proxy_star_merges_into_configurable_proxy_map():
-    # The process-wide defaults are merged into the internal checker's rules,
-    # so a global "*" bypasses through ConfigurableProxyMap as well.
-    # NOTE: this constructs with bypass_local=True on purpose -- a bare
-    # ConfigurableProxyMap(map) builds no bypass checker at all and therefore
-    # consults no defaults, which is a separate known gap.
-    from proxylib import ConfigurableProxyMap, SimpleProxyMap
-
-    set_default_no_proxy(["*"])
-    cfg = ConfigurableProxyMap(SimpleProxyMap("http://proxy:80"), bypass_local=True)
-    assert list(cfg["https://example.com"]) == [None]
-
-
-def test_from_env_reads_upper_and_lower_case(monkeypatch):
-    monkeypatch.delenv("HTTP_PROXY", raising=False)
-    monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    monkeypatch.delenv("NO_PROXY", raising=False)
-    monkeypatch.setenv("http_proxy", "http://proxy:80")
-    monkeypatch.setenv("no_proxy", "localhost, example.com")
-
-    cfg = EnvProxyConfig.from_env()
-    assert cfg["http://localhost"] == [None]
-    assert cfg["http://example.com"] == [None]
-    assert list(cfg["http://other.com"]) == [Proxy.from_str("http://proxy:80")]
-
-
-def test_no_proxy_accepts_abbreviated_ipv4_cidr():
-    # macOS ships "169.254/16" in its default bypass list.
-    cfg = EnvProxyConfig("http://proxy:80", None, ["169.254/16", "10/8"])
-    assert cfg["http://169.254.1.2/"] == [None]
-    assert cfg["http://10.1.2.3/"] == [None]
-    assert list(cfg["http://11.0.0.1/"]) == [Proxy.from_str("http://proxy:80")]
-
-
-def test_no_proxy_unparsable_entry_is_skipped_with_warning():
-    with pytest.warns(UserWarning, match="10.0.0.0/99"):
-        cfg = EnvProxyConfig("http://proxy:80", None, ["10.0.0.0/99", "example.com"])
-    assert cfg["http://example.com/"] == [None]
-    assert list(cfg["http://other.test/"]) == [Proxy.from_str("http://proxy:80")]
-
-
-def _clear_proxy_env(monkeypatch):
-    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY",
-                 "no_proxy", "REQUEST_METHOD"):
-        monkeypatch.delenv(name, raising=False)
-
-
-def test_from_env_ignores_uppercase_http_proxy_inside_cgi(monkeypatch):
+def test_cgi_request_ignores_uppercase_http_proxy():
     # httpoxy: a CGI server turns the client's "Proxy:" header into HTTP_PROXY.
-    _clear_proxy_env(monkeypatch)
-    monkeypatch.setenv("REQUEST_METHOD", "GET")
-    monkeypatch.setenv("HTTP_PROXY", "http://attacker:1")
-    monkeypatch.setenv("HTTPS_PROXY", "http://trusted:3128")
-    cfg = EnvProxyConfig.from_env()
+    cfg = _env(REQUEST_METHOD="GET", HTTP_PROXY="http://attacker:1", HTTPS_PROXY="http://ok:1")
     with pytest.raises(KeyError):
         cfg["http://example.com/"]
-    assert list(cfg["https://example.com/"]) == [Proxy.from_str("http://trusted:3128")]
+    assert cfg["https://example.com/"][0].host == "ok"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="environment names are case-insensitive on Windows")
-def test_from_env_keeps_lowercase_http_proxy_inside_cgi(monkeypatch):
-    _clear_proxy_env(monkeypatch)
+def test_cgi_request_keeps_lowercase_http_proxy():
+    cfg = _env(REQUEST_METHOD="GET", http_proxy="http://trusted:1")
+    assert cfg["http://example.com/"][0].host == "trusted"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows environment names are case-insensitive")
+def test_cgi_on_windows_ignores_http_proxy_from_os_environ(monkeypatch):
     monkeypatch.setenv("REQUEST_METHOD", "GET")
-    monkeypatch.setenv("http_proxy", "http://trusted:3128")
-    cfg = EnvProxyConfig.from_env()
-    assert list(cfg["http://example.com/"]) == [Proxy.from_str("http://trusted:3128")]
+    monkeypatch.setenv("http_proxy", "http://attacker:1")
+    with pytest.raises(KeyError):
+        EnvProxyConfig()["http://example.com/"]
+
+
+def test_a_key_that_is_not_a_url_is_a_parse_error():
+    with pytest.raises(ProxyParseError):
+        _env(http_proxy="http://p:1")["http"]
+
+
+def test_repr_hides_the_password():
+    assert "secret" not in repr(_env(http_proxy="http://u:secret@p:1"))
+
+
+def test_lookup_reads_an_env_config():
+    assert lookup(_env(all_proxy="http://p:1"), "http://x/")[0].host == "p"
+
+
+def test_empty_values_are_ignored():
+    with pytest.raises(KeyError):
+        _env(http_proxy="")["http://x/"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _env(no_proxy="")
+
+
+def _clear_proxy_variables(monkeypatch):
+    import os as _os
+
+    for name in list(_os.environ):
+        if name.lower().endswith("_proxy") or name.upper() == "REQUEST_METHOD":
+            monkeypatch.delenv(name, raising=False)
+
+
+def test_default_env_is_the_process_environment(monkeypatch):
+    _clear_proxy_variables(monkeypatch)
+    monkeypatch.setenv("ALL_PROXY", "http://fromenv:1")
+    assert EnvProxyConfig()["http://x/"][0].host == "fromenv"
+
+
+def test_an_empty_env_reads_nothing(monkeypatch):
+    monkeypatch.setenv("ALL_PROXY", "http://fromenv:1")
+    with pytest.raises(KeyError):
+        EnvProxyConfig({})["http://x/"]
+
+
+def test_keywords_apply_over_the_env():
+    cfg = EnvProxyConfig(
+        {"http_proxy": "http://env:1", "https_proxy": "http://envtls:1", "no_proxy": "a.test"},
+        proxies={"http": "http://kw:1"},
+        no_proxy="b.test",
+    )
+    assert cfg["http://x/"][0].host == "kw"
+    assert cfg["https://x/"][0].host == "envtls"
+    assert cfg["http://b.test/"] == (None,)
+    assert cfg["http://a.test/"][0].host == "kw"

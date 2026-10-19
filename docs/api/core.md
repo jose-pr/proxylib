@@ -1,7 +1,3 @@
-# Core
+# Proxies and proxy maps
 
 ::: proxylib.proxy
-
-::: proxylib.env
-
-::: proxylib.netutils

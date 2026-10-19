@@ -1,58 +1,50 @@
 # proxylib
 
-[![PyPI version](https://img.shields.io/pypi/v/proxylib.svg)](https://pypi.org/project/proxylib/)
+[![Version](https://img.shields.io/pypi/v/proxylib.svg)](https://pypi.org/project/proxylib/)
 [![Python versions](https://img.shields.io/pypi/pyversions/proxylib.svg)](https://pypi.org/project/proxylib/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jose-pr/proxylib/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://jose-pr.github.io/proxylib/)
+[![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/proxylib/test.yaml)](https://github.com/jose-pr/proxylib/actions/workflows/test.yaml)
 
-Platform-agnostic proxy configuration for Python: detect the system/environment proxy
-settings, evaluate PAC (Proxy Auto-Config) files — including WPAD auto-discovery — and
-wire the result straight into [`requests`](https://requests.readthedocs.io/) or
-[`urllib`](https://docs.python.org/3/library/urllib.request.html).
-
-Zero required runtime dependencies; a couple of optional extras unlock more (see below).
+**Which proxy should this request use?** proxylib answers it the same way on every
+OS — from the proxy environment variables, the OS's own resolver and settings, or a
+PAC file — and gets the answer into `requests`, `urllib`, `httpx` and `aiohttp`, with
+failover along the list a PAC returns. Documentation:
+<https://jose-pr.github.io/proxylib/>.
 
 ## Features
 
-- **Proxy string parsing** — `PROXY host:port; DIRECT`-style PAC strings, `scheme://host:port`
-  URLs, and env-var-style values, all normalized into a common `Proxy` type.
-- **System proxy detection** — Windows (via the WinHTTP API), macOS (`scutil --proxy`),
-  and Linux (env vars, plus best-effort [libproxy](https://libproxy.github.io/libproxy/),
-  GNOME, MATE, KDE, and NetworkManager checks — tried in that order, first match wins).
-  `system_proxy()` respects each OS/desktop's own auto-detect (WPAD) signal —
-  "Automatically detect settings" on Windows, "Auto Proxy Discovery" on macOS, mode
-  `auto` with a blank Configuration URL on GNOME/MATE, `ProxyType=3` in KDE's
-  `kioslaverc`, or NetworkManager's `proxy.method=auto` with no PAC set — and tries
-  WPAD itself first, in that platform's own precedence order (auto-detect → PAC script
-  → manual proxy → DIRECT). NetworkManager is read via `nmcli` if installed, else
-  `dbus-send` directly. `LibProxyMap` (libproxy's own resolution, called via `ctypes`
-  bindings to its C API — no subprocess) is also available as a standalone `ProxyMap`
-  you can use directly on any platform.
-- **Env var proxy config** — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (and lowercase
-  variants), with correct exact/subdomain `NO_PROXY` matching, plus CIDR entries,
-  `<local>`, and `*` (bypass everything; curl and `requests` honour it only as the
-  whole value, proxylib anywhere in the list).
-- **PAC support** — the full Netscape PAC utility-function set (including
-  `dateRange`/`timeRange`) plus the common Microsoft `*Ex` extensions, runnable either
-  as real JavaScript through a pluggable engine (`dukpy` or `quickjs`, picked via
-  `PROXYLIB_JS_ENGINE` or preferring `quickjs` if installed) or by subclassing in Python.
-- **WPAD discovery** — DNS + HTTP `wpad.<domain>/wpad.dat` lookup. Used directly by
-  `system_proxy()` on any platform/desktop whose own auto-detect setting is on, and as
-  a generic last-resort fallback in `auto_proxy()` when nothing else is configured.
-  Results (including "no WPAD server here") are cached for 5 minutes so repeated
-  lookups don't re-probe the network, and DNS resolution fails fast on a hanging lookup.
-- **`requests` integration** — a `ProxyMapAdapter` Transport Adapter that resolves the
-  proxy from the real request URL (not just scheme+host).
-- **`urllib.request` integration** — `ProxyMapHandler`, the same idea as
-  `ProxyMapAdapter` but for the standard library's opener/handler system.
-- **Global patching** — `proxylib.patch(proxymap)` wires an active `ProxyMap` into
-  newly created `requests.Session`s and a global `urllib` opener, without mounting an
-  adapter by hand; `proxylib.unpatch()` undoes it, and any `ProxyMap` also works
-  directly as a context manager (`with proxymap:`).
-- **Decorators & composition** — `ChainProxyMap` for sequential fallback across
-  multiple `ProxyMap`s, and `ConfigurableProxyMap` for opt-in caching, active
-  reachability probing (with a circuit breaker for dead proxies), round-robin
-  selection, browser-style HTTPS privacy stripping, and local-address bypass.
+- **One precedence on every OS** — `auto_proxy()` uses the proxy environment variables
+  when any is set (as `urllib.request.getproxies()` does), else the OS's own resolver
+  (WinHTTP on Windows, CFNetwork on macOS, [libproxy](https://libproxy.github.io/libproxy/)
+  on Linux when installed), backed by the OS settings read directly.
+- **OS settings as data** — `system_config()` returns a `ProxyConfig` from the Windows
+  Internet Options, macOS System Configuration, or GNOME, MATE, KDE and NetworkManager:
+  per-scheme proxies, SOCKS, the PAC URL, auto-detection and the bypass list in that
+  OS's own syntax, with "the OS says no proxy" told apart from "no settings".
+- **WPAD only when asked** — auto-detection runs when the OS has it switched on, or
+  with `wpad=True` on a machine with no settings; never because nothing else was found.
+- **PAC scripts that cannot hang you** — the full Netscape and Microsoft PAC builtins,
+  run as real JavaScript (quickjs or dukpy) in a helper process with a time limit; a
+  Python function can stand in for `FindProxyForURL`.
+- **Clients with failover** — `requests`, `httpx`, `aiohttp` and `urllib` resolve the
+  proxy from the real request URL; a `PROXY a; PROXY b; DIRECT` answer is a failover
+  list, and a proxy that refuses or times out connecting is skipped for 5 minutes.
+- **Proxy headers and URL-prefix gateways** — a `Proxy` can carry headers sent to that
+  proxy only (a Bearer token, or a credential under another header name), and
+  `prefix+https://gw/fetch/` (`PREFIX https://gw/fetch/` in a PAC result) names a
+  gateway fetching `<gateway><URL>`. A client skips the entries it cannot use and raises
+  `UnsupportedProxyError` when none is left, instead of leaking a header or going
+  elsewhere.
+- **Patched clients that behave as before** — `requests` and `urllib` get proxylib's
+  integration as they are imported, choosing exactly the proxy they always did until
+  you `patch()` a map in (nestable) or name them in `PROXYLIB_IMPORTPATCH`.
+- **Bypass rules in each OS's syntax** — `NO_PROXY` (curl), Windows `ProxyOverride`,
+  macOS `ExceptionsList`, GNOME `ignore-hosts`, KDE `NoProxyFor`: suffixes, globs, IPv4
+  and IPv6 CIDR, ports, `<local>`, `<subnet>`.
+- **Composable** — any mapping is a proxy map; `ChainProxyMap`, `Bypass`, `Cached`,
+  `RoundRobin` and `Probed` compose in the order you write them; `alookup()` for
+  asyncio.
 
 ## Installation
 
@@ -60,200 +52,201 @@ Zero required runtime dependencies; a couple of optional extras unlock more (see
 pip install proxylib
 ```
 
-Optional extras:
+Python 3.9 to 3.14. Dependencies: [netimps](https://pypi.org/project/netimps/) and
+[importpatch](https://pypi.org/project/importpatch/), neither with dependencies of
+its own.
 
 | Extra | Adds | Needed for |
 | --- | --- | --- |
-| `proxylib[jspac]` | `dukpy` | Executing PAC files as JavaScript — "any working engine" meta-extra |
-| `proxylib[dukpy]` | `dukpy` | The `dukpy` JS engine specifically |
-| `proxylib[quickjs]` | `quickjs-ng` (Python ≥3.10) / `quickjs` (Python 3.9) | The `quickjs` JS engine specifically (no dependency on `dukpy`) |
-| `proxylib[ifaddr]` | `ifaddr` | Accurate local network interface/prefix enumeration (used by `NO_PROXY <local>`) |
+| `proxylib[pac]` | `quickjs-ng` (Python 3.10+) / `quickjs` (3.9) | Running PAC files (preferred engine) |
+| `proxylib[dukpy]` | `dukpy` | The dukpy engine, for platforms without a quickjs wheel (Windows ARM64, Intel macOS) |
 
-Without a JS engine installed, PAC files are still fetched and validated, but evaluate
-to `DIRECT` (with a warning) since there's no engine to run them. With more than one
-installed, `quickjs` is preferred by default; set `PROXYLIB_JS_ENGINE=dukpy` (or a
-comma-separated priority list) to change that.
+The `requests`, `httpx` and `aiohttp` integrations need no extra: each works when its
+client is installed. Without a JS engine, loading a PAC raises `MissingExtraError`
+naming the extra; `on_missing_engine="direct"` gives a warning and DIRECT instead.
 
 ## Quick start
 
-### Auto-detect the system proxy and use it with `requests`
+### Ask the machine
+
+```python
+from proxylib import auto_proxy, lookup
+
+proxymap = auto_proxy()  # proxy variables if set, else the OS resolver and settings
+print(lookup(proxymap, "https://example.com/"))  # (Proxy(...), ...) or (None,) for DIRECT
+proxymap.close()
+```
+
+### `requests`
 
 ```python
 import requests
-from proxylib import auto_proxy, ProxyMapAdapter
-
-proxymap = auto_proxy()  # OS settings -> env vars -> WPAD discovery -> DIRECT
+from proxylib import ProxyMapAdapter, auto_proxy
 
 session = requests.Session()
-adapter = ProxyMapAdapter(proxymap)
+adapter = ProxyMapAdapter(auto_proxy())
 session.mount("http://", adapter)
 session.mount("https://", adapter)
-
-response = session.get("https://example.com")
+response = session.get("https://example.com/")
 ```
 
-`ProxyMapAdapter` is the recommended integration: it hooks `HTTPAdapter.send()`, so it
-sees the real request URL (scheme, host *and* path) — exactly what a PAC file's
-`FindProxyForURL` is meant to receive.
-
-When you don't need that fidelity (no PAC path rules), `ProxyDict` is the simpler
-option — a drop-in for any plain proxies dict:
+`ProxyMapAdapter` sees the real request URL — scheme, host *and* path, what a PAC's
+`FindProxyForURL` expects — and fails over along the answer. A chain also works where
+requests takes its proxies:
 
 ```python
-from proxylib import auto_proxy, ProxyDict
+import requests
 
-requests.get("https://example.com", proxies=ProxyDict(auto_proxy()))
+requests.get("https://example.com/", proxies={"https": "PROXY proxy.invalid:3128; DIRECT"})
 ```
 
-### ...or with plain `urllib.request`
+(proxylib's integration, installed whenever requests is imported, reads that value; a
+plain proxy URL there stays requests' own).
+
+### `httpx` and `aiohttp`
+
+```python
+import httpx
+from proxylib import auto_proxy
+from proxylib.integrations.httpx import ProxyTransport
+
+with httpx.Client(transport=ProxyTransport(auto_proxy())) as client:
+    client.get("https://example.com/")
+```
+
+`AsyncProxyTransport` does the same for `httpx.AsyncClient`. aiohttp has no transport
+hook, so its session is wrapped:
+
+```python
+import asyncio
+
+from proxylib import auto_proxy
+from proxylib.integrations.aiohttp import ProxySession
+
+
+async def main():
+    async with ProxySession(auto_proxy()) as session:
+        async with session.get("https://example.com/") as response:
+            return await response.text()
+
+
+asyncio.run(main())
+```
+
+### `urllib`
 
 ```python
 import urllib.request
-from proxylib import auto_proxy, ProxyMapHandler
 
-proxymap = auto_proxy()
-opener = urllib.request.build_opener(ProxyMapHandler(proxymap))
-opener.open("https://example.com")
+from proxylib import ProxyMapHandler, auto_proxy
 
-# or, to affect every urllib.request.urlopen() call process-wide:
-urllib.request.install_opener(opener)
+opener = urllib.request.build_opener(ProxyMapHandler(auto_proxy()))
+opener.open("https://example.com/").read()
 ```
 
-`ProxyMapHandler` subclasses `urllib.request.ProxyHandler` but resolves per-request
-from the `ProxyMap` instead of a static `{scheme: proxy_url}` dict, for the same reason
-`ProxyMapAdapter` exists for `requests`.
-
-### ...or patch every new `requests.Session`/`urllib` opener at once
+### Patch every client at once
 
 ```python
+import requests
+
 import proxylib
 
-with proxylib.auto_proxy():  # patch() on __enter__, unpatch() on __exit__
-    requests.get("https://example.com")  # any new Session picks up the active proxy
+with proxylib.patch(proxylib.auto_proxy()):
+    requests.get("https://example.com/")  # resolved by auto_proxy()
+# back to requests' own choice here; proxylib.unpatch() ends every patch
 ```
 
-Outside a `with` block, call `proxylib.patch(proxymap)`/`proxylib.unpatch()` directly,
-or pass `targets=["requests"]`/`["urllib"]` to patch just one. Sessions created *before*
-`patch()` are untouched.
+Patches nest (the newest wins); `targets=["requests"]` limits one to a client. Without
+code, `PROXYLIB_IMPORTPATCH=1` (or client names: `requests:httpx`) makes those clients
+use `auto_proxy()` in every program that imports them, through importpatch;
+`PROXYLIB_IMPORTPATCH=0` turns the integration off.
 
-### From environment variables
+### PAC files
 
 ```python
-from proxylib import EnvProxyConfig
+from proxylib import load_pac, loads_pac, lookup
 
-proxymap = EnvProxyConfig.from_env()  # HTTP_PROXY / HTTPS_PROXY / NO_PROXY
-proxymap["https://example.com"]  # -> [Proxy(...)] or [None] for DIRECT
+script = 'function FindProxyForURL(url, host) { return "PROXY proxy.invalid:3128; DIRECT"; }'
+from_text = loads_pac(script)
+from_url = load_pac("https://example.com/proxy.pac")  # a URL, or a path
+print(lookup(from_text, "https://example.com/"))
+from_text.close()
+from_url.close()
 ```
 
-### A fixed proxy, or DIRECT
+Each call gets 5 seconds (`script_timeout=`): an overrun raises `PACError` and the
+script fails fast for 30 seconds before it is restarted.
+
+### Any mapping is a proxy map
 
 ```python
-from proxylib import SimpleProxyMap
+from proxylib import Bypass, ChainProxyMap, EnvProxyConfig, SimpleProxyMap, lookup
 
-proxymap = SimpleProxyMap("http://user:pass@proxy.example.com:8080")
-direct = SimpleProxyMap("DIRECT")
+proxymap = Bypass(
+    ChainProxyMap({"https": "http://corp-proxy:3128"}, EnvProxyConfig(), SimpleProxyMap("DIRECT")),
+    "*.internal, 10.0.0.0/8",
+)
+print(lookup(proxymap, "https://example.com/"))  # (Proxy(scheme='http', host='corp-proxy', port=3128),)
+print(lookup(proxymap, "https://app.internal/"))  # (None,)
 ```
-
-### Loading a PAC file directly
-
-```python
-from proxylib import load_pac
-
-proxymap = load_pac("https://example.com/proxy.pac")
-proxymap = load_pac("file:./proxy.pac")
-proxymap["https://example.com/"]
-```
-
-`ProxyMap(source)` is a small factory that picks the right implementation for you: a
-bare `scheme://host:port` string builds a `SimpleProxyMap`, while anything that looks
-like a PAC file/URL is loaded with `load_pac`.
 
 ## API overview
 
 | Module | Purpose |
 | --- | --- |
-| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, `ConfigurableProxyMap`, URI parsing |
-| `proxylib.patching` | `patch()` / `unpatch()` / `register_patcher()` — global patching registry |
-| `proxylib.env` | `EnvProxyConfig` — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` |
-| `proxylib.os` | `system_proxy()` / `auto_proxy()` — platform dispatch + WPAD fallback |
-| `proxylib.os.nt` / `.darwin` | Windows (WinHTTP API) / macOS (`scutil`) system proxy backends |
-| `proxylib.os.posix` | Linux dispatch: `.libproxy`, `.gnome`, `.mate`, `.kde`, `.networkmanager` |
-| `proxylib.pac` | `PAC`, `JSProxyAutoConfig`, `load()` — PAC utility functions + evaluation |
-| `proxylib.pac.wpad` | `discover()` — DNS+HTTP WPAD auto-discovery |
-| `proxylib.pac.javascript` | `JSContext` — runs a PAC script against a pluggable engine |
-| `proxylib.pac.engines` | `JSEngine` interface, plus the `dukpy`/`quickjs` backends |
-| `proxylib.integrations.requests` | `ProxyMapAdapter` — the recommended `requests` integration |
-| `proxylib.integrations.urllib` | `ProxyMapHandler` — a per-request-aware `urllib.request.ProxyHandler` |
-| `proxylib.integrations.dict` | `ProxyDict` — the plain proxies-dict integration |
-| `proxylib.netutils` | `get_ip`, `get_default_port`, `get_local_interfaces`, `first_working_proxy` |
+| `proxylib.proxy` | `Proxy`, the `ProxyMap` protocol and factory, `SimpleProxyMap`, `ChainProxyMap`, `lookup()`, `alookup()` |
+| `proxylib.wrappers` | `Bypass`, `Cached`, `RoundRobin`, `Probed`, `configure()` |
+| `proxylib.bypass` | `BypassRules` and its dialects |
+| `proxylib.env` | `EnvProxyConfig` — the proxy environment variables |
+| `proxylib.system` | `auto_proxy()`, `system_config()`, `ProxyConfig`; the OS resolvers `WinHTTPProxyMap`, `CFNetworkProxyMap`, `LibProxyMap` |
+| `proxylib.pac` | `load()`, `loads()`, `PacScript`, `PacProxyMap`, `functions`; `.wpad.discover()`; `.engines` |
+| `proxylib.patching` | `patch()`, `Patch`, `unpatch()`, `register_patcher()`, `active()`, `targets()` |
+| `proxylib.integrations` | `.requests.ProxyMapAdapter`, `.urllib.ProxyMapHandler`, `.httpx.ProxyTransport`/`AsyncProxyTransport`, `.aiohttp.ProxySession`, `.dict.ProxyDict` |
+| `proxylib.exceptions` | `ProxylibError` and its subclasses |
 
-Every `ProxyMap` implementation (`SimpleProxyMap`, `EnvProxyConfig`, `PAC`, ...) answers
-the same question: `proxymap[url]` returns the sequence of `Proxy` (or `None` for
-DIRECT) to try, in order.
+The full contract, with every signature, is the API header shipped in the package
+(`proxylib/AGENTS.md`) and the [documentation site](https://jose-pr.github.io/proxylib/).
+Moving from 1.x: [migration guide](https://jose-pr.github.io/proxylib/migration-2.0/).
 
-## Supported Python versions
+## Known limitations
 
-Python 3.9–3.14. The codebase uses `from __future__ import annotations` so modern
-`X | Y` type syntax can be used everywhere while staying importable on 3.9.
+- **DHCP-based WPAD is not implemented** — only DNS+HTTP (`wpad.<domain>/wpad.dat`).
+- **Linux desktops** are read without session detection: GNOME/MATE (`gsettings`), KDE
+  (`kioslaverc`) and NetworkManager (`nmcli`, or `dbus-send`); the first with a proxy
+  configured wins. Other desktops are covered only through libproxy, if installed.
+  The `dbus-send` path reads its debug output and has not been checked against a live
+  NetworkManager.
+- **urllib does not fail over** — `ProxyMapHandler` uses the healthiest entry but cannot
+  re-send a request through the next one; use `Probed(proxymap)`, or requests, httpx or
+  aiohttp. Failover happens only for errors before the request is sent.
+- **SOCKS proxies need the client's SOCKS support**: `requests[socks]` for requests,
+  `httpx[socks]` for httpx; aiohttp and urllib speak HTTP proxies only.
+- **aiohttp skips gateways** (requests, httpx and urllib take them). urllib
+  sends only a `Proxy-Authorization` proxy header for https URLs (it would send any
+  other through the tunnel), so it skips a proxy with other headers there.
 
 ## Development
 
 ```bash
-python -m venv .venv/<your-python-version>
-.venv/<your-python-version>/Scripts/pip install -e ".[dev,jspac,ifaddr]"
-.venv/<your-python-version>/Scripts/pytest -q
+python -m venv .venv/3.14
+.venv/3.14/Scripts/python -m pip install -e ".[dev,dukpy]"
+.venv/3.14/Scripts/python -m pytest -q -W error::UserWarning
 ```
 
-Tests that need `dukpy`/`quickjs`/`ifaddr` skip automatically if those extras aren't
-installed (`requests` comes from `dev`, since it's a real test dependency regardless of
-the `requests` integration's own optional-import guard).
+(`bin/` instead of `Scripts/` outside Windows.) The quickjs tests need `proxylib[pac]`,
+which has no Windows ARM64 wheel; they skip, visibly, without it. The docs build with
+`pip install -e ".[docs]"` and `mkdocs build --strict`.
 
 ### Releasing
 
 This project follows [Semantic Versioning](https://semver.org/) and keeps a
-[`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` (e.g. `v1.0.0`) triggers
-[`.github/workflows/release.yaml`](.github/workflows/release.yaml), which runs the test
-suite across platforms/Python versions as a gate, then in parallel: builds the
-sdist/wheel, creates a GitHub Release (with auto-generated release notes and a diff link
-against the previous tag) and publishes it to PyPI via [Trusted
-Publishing](https://docs.pypi.org/trusted-publishers/) (no stored token), and
-builds+publishes the [documentation site](#documentation-site) to GitHub Pages.
-
-### Documentation site
-
-API reference docs are built with [MkDocs](https://www.mkdocs.org/) +
-[mkdocstrings](https://mkdocstrings.github.io/) from `mkdocs.yml`/`docs/`, and
-published to GitHub Pages on every release (see above). To preview locally:
-
-```bash
-.venv/<your-python-version>/Scripts/pip install -e ".[docs]"
-.venv/<your-python-version>/Scripts/mkdocs serve
-```
-
-## Known limitations
-
-- **DHCP-based WPAD discovery is not implemented** — only DNS+HTTP (`wpad.<domain>/wpad.dat`).
-  Reading DHCP option 252 needs raw OS lease access with no portable stdlib path.
-- **Linux desktop proxy detection** covers libproxy, GNOME/MATE (`gsettings`), KDE
-  (`kioslaverc`), and NetworkManager (`nmcli`, or `dbus-send` if `nmcli` isn't
-  installed), tried in that fixed order with no session detection to disambiguate — if
-  a machine has stale config from more than one of these, the first one with anything
-  set wins, even if it isn't the active desktop. Xfce, Cinnamon, and other desktop
-  environments aren't covered directly (though libproxy, if installed, may cover them)
-  — set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` or `PROXY_PAC` explicitly otherwise.
-- The NetworkManager `dbus-send` fallback path scrapes `dbus-send`'s
-  debug-oriented text output for the specific fields it needs; it hasn't been verified
-  against a live NetworkManager D-Bus session, only a best-effort reconstruction of the
-  expected format. `nmcli`, when available, is preferred and doesn't have this caveat.
-- `dateRange`/`timeRange` implement the documented PAC overload shapes but haven't been
-  exhaustively verified against every real-world PAC file's edge cases.
-- **No automatic proxy failover in the adapters themselves** — `ProxyMapAdapter`/
-  `ProxyMapHandler` use the first proxy a `ProxyMap` returns; they don't retry the rest
-  of a `PROXY a; PROXY b; DIRECT` chain on connection failure. Wrap your map with
-  `ConfigurableProxyMap(proxymap, probe=True)` (active reachability probing, with a
-  circuit breaker for proxies that keep failing), or call
-  `first_working_proxy(proxymap[url])` directly, to pre-select a reachable entry.
+[`CHANGELOG.md`](https://github.com/jose-pr/proxylib/blob/main/CHANGELOG.md). Pushing a
+tag matching `v*` triggers the release workflow: test gate → build (checking the tag
+names the version built) → a strict docs build as a gate → GitHub release → publish to
+PyPI with trusted publishing. The release workflow never deploys the docs site itself:
+for a final release its last job dispatches the docs workflow at the tag, which owns
+every Pages deploy.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/jose-pr/proxylib/blob/main/LICENSE).

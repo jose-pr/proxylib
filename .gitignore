@@ -1,25 +1,32 @@
-__pycache__
-/.git
-/.pytest*
-/_*
-[a-zA-Z]*__
-[a-zA-Z]*__.*
-/dist
-/.venv
-/site
+# Nothing dot-prefixed at the repository root is tracked except these.
+/.*
+!/.gitignore
+!/.gitattributes
+!/.github/
+
+# Private agent config and personal overrides.
 .agents
-*.local.md
+*.local.*
 CLAUDE*
 .claude
 
-# Standard Python block -- kept complete even for tools this repo doesn't
-# currently use, since these dirs first appear the moment someone runs one.
+# Local scratch names
+/_*
+[a-zA-Z]*__
+[a-zA-Z]*__.*
+
+# Build and docs output
+/dist
+/build
+/site
+
+# Python
+__pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .hypothesis/
 .mypy_cache/
 .ruff_cache/
 .coverage*
 htmlcov/
-*.egg-info/
-.venv/

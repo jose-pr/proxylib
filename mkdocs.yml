@@ -24,12 +24,17 @@ theme:
 
 nav:
   - Home: index.md
+  - Migrating from 1.x: migration-2.0.md
   - API Reference:
-      - Core (Proxy, ProxyMap, EnvProxyConfig): api/core.md
-      - System detection: api/os.md
+      - Proxies and proxy maps: api/core.md
+      - Wrappers: api/wrappers.md
+      - Bypass rules: api/bypass.md
+      - Environment variables: api/env.md
+      - System settings: api/system.md
       - PAC support: api/pac.md
-      - requests / urllib integrations: api/integrations.md
-      - Patching registry: api/patching.md
+      - Patching clients: api/patching.md
+      - Client integrations: api/integrations.md
+      - Exceptions: api/exceptions.md
   - Changelog: changelog.md
 
 plugins:

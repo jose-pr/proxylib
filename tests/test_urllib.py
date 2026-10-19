@@ -4,7 +4,7 @@ from proxylib import Proxy, ProxyMapHandler, SimpleProxyMap
 
 
 def test_proxymaphandler_injects_resolved_proxy():
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy.example.com:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy.example.com:8080"))
     handler = ProxyMapHandler(proxymap)
 
     req = urllib.request.Request("http://example.com/foo")
@@ -12,6 +12,23 @@ def test_proxymaphandler_injects_resolved_proxy():
 
     assert result is None  # falls through to the default (now-proxying) handler
     assert req.host == "proxy.example.com:8080"
+
+
+def test_proxymaphandler_no_opinion_uses_urllibs_own_proxies(monkeypatch):
+    class NoOpinion:
+        def __getitem__(self, url):
+            raise KeyError(url)
+
+    handler = ProxyMapHandler(NoOpinion())
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {"http": "http://env.example:3128"})
+    req = urllib.request.Request("http://example.com/foo")
+    assert handler.http_open(req) is None
+    assert req.host == "env.example:3128"
+
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
+    req = urllib.request.Request("http://example.com/foo")
+    assert handler.http_open(req) is None
+    assert req.host == "example.com"
 
 
 def test_proxymaphandler_direct_leaves_request_untouched():
@@ -28,7 +45,7 @@ def test_proxymaphandler_https_open_injects_resolved_proxy():
     # https doesn't take the request-type-mismatch recursion path (it always
     # returns None to let the same handler chain continue, tunneling via
     # CONNECT), so this is directly exercisable without a registered opener.
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy.example.com:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy.example.com:8080"))
     handler = ProxyMapHandler(proxymap)
 
     req = urllib.request.Request("https://example.com/foo")
@@ -43,7 +60,7 @@ def test_proxymaphandler_ftp_open_is_same_resolver_as_http_open():
     # which needs a real registered opener (and would attempt a real
     # connection) -- out of scope here. Just confirm the three protocol
     # hooks share the same resolution logic.
-    proxymap = SimpleProxyMap(Proxy.from_str("http://proxy.example.com:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://proxy.example.com:8080"))
     handler = ProxyMapHandler(proxymap)
 
     assert handler.ftp_open.__func__ is handler.http_open.__func__
@@ -54,9 +71,9 @@ def test_proxymaphandler_uses_full_url_not_just_scheme(monkeypatch):
     calls = []
 
     class RecordingProxyMap:
-        def get(self, url, default=None):
+        def __getitem__(self, url):
             calls.append(url)
-            return [Proxy.from_str("http://proxy:8080")]
+            return [Proxy.parse("http://proxy:8080")]
 
     handler = ProxyMapHandler(RecordingProxyMap())
     req = urllib.request.Request("http://example.com/some/path?query=1")
@@ -70,7 +87,7 @@ def test_proxymaphandler_does_not_shadow_methods_with_env_proxies(monkeypatch):
     # setattr per-protocol instance methods that shadow ours -- make sure
     # constructing with an env HTTP_PROXY set doesn't break this.
     monkeypatch.setenv("HTTP_PROXY", "http://from-env:9999")
-    proxymap = SimpleProxyMap(Proxy.from_str("http://from-proxymap:8080"))
+    proxymap = SimpleProxyMap(Proxy.parse("http://from-proxymap:8080"))
     handler = ProxyMapHandler(proxymap)
 
     req = urllib.request.Request("http://example.com/foo")
@@ -83,3 +100,15 @@ def test_proxymaphandler_build_opener_installs_handler():
     proxymap = SimpleProxyMap("DIRECT")
     opener = urllib.request.build_opener(ProxyMapHandler(proxymap))
     assert any(isinstance(h, ProxyMapHandler) for h in opener.handlers)
+
+
+def test_proxymaphandler_uses_the_healthiest_entry():
+    from proxylib import _net
+
+    _net.clear_caches()
+    _net.mark_bad(Proxy.parse("http://bad.example:8080"))
+    handler = ProxyMapHandler(SimpleProxyMap("PROXY bad.example:8080; PROXY good.example:8080"))
+    req = urllib.request.Request("http://example.com/foo")
+    handler.http_open(req)
+    assert req.host == "good.example:8080"
+    _net.clear_caches()
