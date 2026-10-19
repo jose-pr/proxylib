@@ -327,6 +327,14 @@ async def alookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]"
     return await asyncio.to_thread(lookup, proxymap, url)
 
 
+def _close(proxymap: Any) -> None:
+    """``proxymap.close()`` when it has one: a map that owns a resource (a PAC
+    helper process, an OS session) frees it there."""
+    close = getattr(proxymap, "close", None)
+    if callable(close):
+        close()
+
+
 def _is_pac_location(text: str) -> bool:
     """A ``file:`` URL, inline PAC source, or an ``http(s)`` URL with a path
     beyond ``/`` (``http://wpad.corp/proxy.pac``); ``http://proxy:3128/`` is a
@@ -364,6 +372,11 @@ class _LazyPacMap:
                     self._pac = pac._load_any(self.source)
         return lookup(self._pac, url)
 
+    def close(self) -> None:
+        with self._lock:
+            pac, self._pac = self._pac, None
+        _close(pac)
+
 
 def _from_source(src: Any = None) -> ProxyMap:
     """``ProxyMap(src)``; see :class:`ProxyMap`."""
@@ -395,6 +408,9 @@ class SimpleProxyMap(ProxyMap):
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         return self.proxies
 
+    def close(self) -> None:
+        """Nothing to free; every built-in map has ``close()``."""
+
 
 class ChainProxyMap(ProxyMap):
     """Asks each map in order; the first with an opinion answers.
@@ -412,6 +428,11 @@ class ChainProxyMap(ProxyMap):
 
     def __repr__(self) -> str:
         return f"ChainProxyMap({', '.join(map(repr, self.maps))})"
+
+    def close(self) -> None:
+        """Close every link that has ``close()``."""
+        for proxymap in self.maps:
+            _close(proxymap)
 
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         for proxymap in self.maps:

@@ -16,7 +16,7 @@ from typing import Iterable, Optional, Tuple, Union
 
 from . import _net
 from .bypass import BypassRules
-from .proxy import Proxy, ProxyMap, lookup
+from .proxy import Proxy, ProxyMap, _close, lookup
 
 __all__ = ("Bypass", "Cached", "Probed", "RoundRobin", "configure")
 
@@ -36,6 +36,10 @@ class Bypass:
 
     def __repr__(self) -> str:
         return f"Bypass({self.inner!r}, {self.rules!r})"
+
+    def close(self) -> None:
+        """Close the inner map."""
+        _close(self.inner)
 
     def __getitem__(self, url: str) -> _Answer:
         if self.rules.matches(url):
@@ -61,6 +65,10 @@ class Cached:
 
     def __repr__(self) -> str:
         return f"Cached({self.inner!r}, ttl={self.ttl!r}, maxsize={self.maxsize!r})"
+
+    def close(self) -> None:
+        """Close the inner map."""
+        _close(self.inner)
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -105,6 +113,10 @@ class RoundRobin:
     def __repr__(self) -> str:
         return f"RoundRobin({self.inner!r})"
 
+    def close(self) -> None:
+        """Close the inner map."""
+        _close(self.inner)
+
     def __getitem__(self, url: str) -> _Answer:
         answer = lookup(self.inner, url)
         if len(answer) < 2:
@@ -132,6 +144,10 @@ class Probed:
 
     def __repr__(self) -> str:
         return f"Probed({self.inner!r}, timeout={self.timeout!r})"
+
+    def close(self) -> None:
+        """Close the inner map."""
+        _close(self.inner)
 
     def __getitem__(self, url: str) -> _Answer:
         return (_net.first_working_proxy(lookup(self.inner, url), timeout=self.timeout),)

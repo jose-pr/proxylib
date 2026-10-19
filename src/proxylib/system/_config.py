@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from .. import _net
 from ..bypass import BypassRules
 from ..exceptions import PACError, ProxyParseError
-from ..proxy import ChainProxyMap, Proxy, ProxyMap, SimpleProxyMap, lookup
+from ..proxy import ChainProxyMap, Proxy, ProxyMap, SimpleProxyMap, _close, lookup
 from ..wrappers import Bypass
 from ._run import log
 
@@ -155,6 +155,11 @@ class _Deferred:
 
     def __repr__(self) -> str:
         return f"<deferred {self.name}>"
+
+    def close(self) -> None:
+        with self._lock:
+            proxymap, self._map = self._map, None
+        _close(proxymap)
 
     def _get(self) -> "Optional[ProxyMap]":
         with self._lock:

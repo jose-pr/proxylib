@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from .bypass import BypassRules
 from .exceptions import ProxyParseError
-from .proxy import Proxy, ProxyMap, lookup
+from .proxy import Proxy, ProxyMap, _close, lookup
 
 __all__ = ("EnvProxyConfig",)
 
@@ -71,6 +71,11 @@ class EnvProxyConfig:
     def __repr__(self) -> str:
         shown = {k: (v.url if isinstance(v, Proxy) else _redact(v)) for k, v in self.proxies.items()}
         return f"EnvProxyConfig(proxies={shown!r}, no_proxy={self.no_proxy!r})"
+
+    def close(self) -> None:
+        """End the helper process of any PAC a variable named."""
+        for proxymap in self._maps.values():
+            _close(proxymap)
 
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         scheme = _request_scheme(url)

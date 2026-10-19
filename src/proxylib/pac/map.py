@@ -37,6 +37,12 @@ class PacProxyMap:
     def __repr__(self) -> str:
         return f"PacProxyMap({self.script!r})"
 
+    def close(self) -> None:
+        """End the script's helper process (a Python function has none)."""
+        close = getattr(self.script, "close", None)
+        if callable(close):
+            close()
+
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         parts = urlsplit(url)
         if self.browser_compatibility and parts.scheme.lower() == "https":

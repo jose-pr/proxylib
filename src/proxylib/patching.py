@@ -38,7 +38,7 @@ __all__ = ("Patch", "active", "patch", "register_patcher", "targets", "unpatch")
 InstallFunc = Callable[[ProxyMap], None]
 UninstallFunc = Callable[[], None]
 
-SETTING = "PROXYLIB_IMPORTPATCH"
+_SETTING = "PROXYLIB_IMPORTPATCH"
 # The importpatch patcher (also proxylib's entry point); it calls _on_import.
 _AUTOPATCH = "proxylib.integrations.autopatch"
 _TRUE = ("1", "true", "yes", "on")
@@ -68,7 +68,7 @@ class _Setting(NamedTuple):
 
 def _setting() -> _Setting:
     """``PROXYLIB_IMPORTPATCH``, read when a client is imported."""
-    raw = os.environ.get(SETTING, "").strip()
+    raw = os.environ.get(_SETTING, "").strip()
     if raw.lower() in _FALSE:
         return _Setting(True, frozenset())
     if raw.lower() in _TRUE:
@@ -83,7 +83,7 @@ def _setting() -> _Setting:
         if name in _registry:
             names.add(name)
         else:
-            warnings.warn(f"{SETTING} names {part!r}, which is not one of {', '.join(_registry)}", stacklevel=3)
+            warnings.warn(f"{_SETTING} names {part!r}, which is not one of {', '.join(_registry)}", stacklevel=3)
     return _Setting(False, frozenset(names))
 
 

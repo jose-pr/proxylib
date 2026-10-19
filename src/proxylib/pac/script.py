@@ -78,8 +78,13 @@ class _Runner:
         self._replies: "queue.Queue" = queue.Queue()
         threading.Thread(target=self._read, name="proxylib-pac-child", daemon=True).start()
         self._lock = threading.Lock()
-        self._wait_reply(_CHILD_START_TIMEOUT)  # "ready": the helper has imported dukpy
-        self._request(("init", engine, source, dict(extra), _MEMORY_LIMIT), timeout)
+        try:
+            self._wait_reply(_CHILD_START_TIMEOUT)  # "ready": the helper has imported its engine
+            self._request(("init", engine, source, dict(extra), _MEMORY_LIMIT), timeout)
+        except BaseException:
+            # The caller never gets this runner to close: end the helper here.
+            self.close()
+            raise
 
     def _read(self) -> None:
         stdout = self._proc.stdout

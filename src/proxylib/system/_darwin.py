@@ -389,6 +389,9 @@ class CFNetworkProxyMap(ProxyMap):
     def __repr__(self) -> str:
         return f"CFNetworkProxyMap(deadline={self.deadline!r})"
 
+    def close(self) -> None:
+        """Nothing to free: CFNetwork state is per lookup."""
+
     def __getitem__(self, url: str) -> "Tuple[Optional[Proxy], ...]":
         entries = _resolve_proxies_for_url(url, self.deadline)
         if entries is None:
