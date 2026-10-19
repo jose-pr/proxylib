@@ -128,3 +128,27 @@ def test_clear_caches_empties_the_circuit_breaker():
     _net._circuit_breaker[("p1", 80)] = float("inf")
     proxylib.clear_caches()
     assert _net._circuit_breaker == {}
+
+
+def test_order_by_health_moves_marked_proxies_last(monkeypatch):
+    a, b, c = (Proxy.parse(f"http://{h}:1") for h in "abc")
+    _net.clear_caches()
+    now = [100.0]
+    monkeypatch.setattr(_net._time, "monotonic", lambda: now[0])
+    _net.mark_bad(a, ttl=60)
+    _net.mark_bad(None, ttl=60)  # DIRECT is never marked
+    assert _net.order_by_health([a, None, b, c]) == [None, b, c, a]
+    _net.mark_bad(b, ttl=60)
+    assert _net.order_by_health([a, b]) == [a, b]  # all bad: original order
+    now[0] += 61
+    assert _net.order_by_health([a, None]) == [a, None]
+    _net.clear_caches()
+
+
+def test_a_marked_proxy_is_skipped_by_probing(monkeypatch):
+    p1, p2 = Proxy.parse("http://p1:80"), Proxy.parse("http://p2:80")
+    _net.clear_caches()
+    monkeypatch.setattr(_net, "_tcp_check", lambda host, port, timeout: True)
+    _net.mark_bad(p1)
+    assert _net.first_working_proxy([p1, p2]) is p2
+    _net.clear_caches()

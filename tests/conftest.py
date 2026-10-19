@@ -50,3 +50,28 @@ def http_server():
     yield server
     server.shutdown()
     server.server_close()
+
+
+@pytest.fixture
+def dead_port():
+    """A local port nothing listens on: connections to it are refused."""
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest.fixture
+def no_proxy_env(monkeypatch):
+    """No proxy variables, and no proxy marked bad by an earlier test."""
+    import os
+
+    from proxylib import clear_caches
+
+    for name in list(os.environ):
+        if name.lower().endswith("_proxy"):
+            monkeypatch.delenv(name)
+    clear_caches()
+    yield
+    clear_caches()

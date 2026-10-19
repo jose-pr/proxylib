@@ -33,6 +33,8 @@ pac = [
     'quickjs-ng; python_version >= "3.10"',
 ]
 dukpy = ['dukpy']
+# proxylib.integrations.httpx: ProxyTransport / AsyncProxyTransport.
+httpx = ['httpx>=0.26,<1']
 # proxylib's requests/urllib integration in every program that imports them,
 # through the entry points below.
 patch = ['importpatch>=0.2,<0.3']

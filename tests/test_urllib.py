@@ -100,3 +100,15 @@ def test_proxymaphandler_build_opener_installs_handler():
     proxymap = SimpleProxyMap("DIRECT")
     opener = urllib.request.build_opener(ProxyMapHandler(proxymap))
     assert any(isinstance(h, ProxyMapHandler) for h in opener.handlers)
+
+
+def test_proxymaphandler_uses_the_healthiest_entry():
+    from proxylib import _net
+
+    _net.clear_caches()
+    _net.mark_bad(Proxy.parse("http://bad.example:8080"))
+    handler = ProxyMapHandler(SimpleProxyMap("PROXY bad.example:8080; PROXY good.example:8080"))
+    req = urllib.request.Request("http://example.com/foo")
+    handler.http_open(req)
+    assert req.host == "good.example:8080"
+    _net.clear_caches()

@@ -145,6 +145,30 @@ def _clear_circuit_breaker() -> None:
     _circuit_breaker.clear()
 
 
+def _health_key(proxy: "Proxy") -> "Tuple[str, int]":
+    return (proxy.host, proxy.port or default_port(proxy.scheme) or 0)
+
+
+def mark_bad(proxy: "Optional[Proxy]", *, ttl: float = 300.0) -> None:
+    """Remember that ``proxy`` failed: :func:`order_by_health` puts it last,
+    and :func:`first_working_proxy` skips it, for ``ttl`` seconds. DIRECT
+    (``None``) is never marked."""
+    if proxy is not None and ttl > 0:
+        _circuit_breaker[_health_key(proxy)] = _time.monotonic() + ttl
+
+
+def order_by_health(entries: "Iterable[Optional[Proxy]]") -> "List[Optional[Proxy]]":
+    """``entries`` with the ones marked bad moved to the end, each group in
+    its original order."""
+    now = _time.monotonic()
+    good: "List[Optional[Proxy]]" = []
+    bad: "List[Optional[Proxy]]" = []
+    for entry in entries:
+        until = _circuit_breaker.get(_health_key(entry)) if entry is not None else None
+        (bad if until is not None and now < until else good).append(entry)
+    return good + bad
+
+
 def first_working_proxy(
     proxies: "Iterable[Optional[Proxy]]",
     *,

@@ -28,6 +28,7 @@ __all__ = [
     "ProxyAnswer",
     "ProxyMap",
     "lookup",
+    "alookup",
     "SimpleProxyMap",
     "ChainProxyMap",
 ]
@@ -310,6 +311,14 @@ def lookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]":
         else:
             raise KeyError(url) from None
     return _normalise(answer)
+
+
+async def alookup(proxymap: ProxyMap, url: str) -> "Tuple[Optional[Proxy], ...]":
+    """:func:`lookup` for asyncio code, run in a worker thread: a PAC script,
+    a download or an OS resolver may block. Same answer and errors."""
+    import asyncio
+
+    return await asyncio.to_thread(lookup, proxymap, url)
 
 
 def _is_pac_location(text: str) -> bool:

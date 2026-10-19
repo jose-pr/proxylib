@@ -17,6 +17,7 @@ from __future__ import annotations
 import urllib.request as urllib_request
 from typing import Any
 
+from .. import _net
 from ..proxy import ProxyMap, lookup
 
 __all__ = ("ProxyMapHandler",)
@@ -45,7 +46,9 @@ class ProxyMapHandler(urllib_request.ProxyHandler):
 
     def _resolve(self, req: Any):
         try:
-            proxy = lookup(self.proxymap, req.full_url)[0]
+            # urllib cannot re-send through another proxy, so the healthiest
+            # entry is the one used.
+            proxy = _net.order_by_health(lookup(self.proxymap, req.full_url))[0]
         except KeyError:
             # No opinion: urllib's own choice, from the environment (and, on
             # Windows and macOS, the system settings urllib reads).

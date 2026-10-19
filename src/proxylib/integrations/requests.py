@@ -11,11 +11,13 @@ simpler proxies-dict style (``requests.get(url, proxies=...)``) use
 from __future__ import annotations
 
 from collections import ChainMap
-from typing import Any
+from typing import Any, Optional, Tuple
 from urllib.parse import urlsplit
 
+from .. import _net
 from ..exceptions import MissingExtraError
-from ..proxy import ProxyMap, lookup
+from ..proxy import _PAC_RESULT, Proxy, ProxyMap, _normalise, lookup
+from .dict import ProxyDict
 
 __all__ = ("ProxyMapAdapter",)
 
@@ -45,6 +47,22 @@ def _build_adapter_class() -> type:
     # names up in this module's globals.
     globals().setdefault("PreparedRequest", PreparedRequest)
 
+    from requests.exceptions import ConnectionError, ConnectTimeout, ProxyError, SSLError
+    from requests.utils import select_proxy
+
+    def failed_before_sending(exc: BaseException) -> bool:
+        """The request never reached the server: the proxy (or, for DIRECT,
+        the server) refused, timed out connecting, or was not reachable."""
+        if isinstance(exc, (ProxyError, ConnectTimeout)):
+            return True
+        if not isinstance(exc, ConnectionError) or isinstance(exc, SSLError):
+            return False
+        from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+        from urllib3.exceptions import ProxyError as URLLib3ProxyError
+
+        reason = getattr(exc.args[0] if exc.args else None, "reason", None)
+        return isinstance(reason, (NewConnectionError, ConnectTimeoutError, URLLib3ProxyError))
+
     class ProxyMapAdapter(HTTPAdapter):
         """A Transport Adapter that resolves the proxy per-request from a ``ProxyMap``.
 
@@ -56,40 +74,82 @@ def _build_adapter_class() -> type:
             session.mount("http://", adapter)
             session.mount("https://", adapter)
 
-        Proxies explicitly passed to ``Session.proxies``/``request(proxies=...)``
-        at the same ``scheme://hostname`` key ``requests`` itself resolves by
-        (see ``requests.utils.select_proxy``) still take precedence over the
-        ``ProxyMap`` result; a less-specific key (e.g. a bare ``"http"``
-        entry, or an env-var-injected one when ``trust_env=True``) does not,
-        since a per-request ``ProxyMap`` decision is more specific by
-        definition -- that's the reason this adapter exists over a plain
-        proxies dict.
+        With ``failover`` (the default), the answer's entries are tried in
+        order, healthy ones first: an entry that fails before the request is
+        sent (the proxy refuses or times out connecting) is marked bad for
+        ``bad_proxy_ttl`` seconds and the next is tried; the last error is
+        raised. DIRECT is an entry like any other. A read or write error never
+        fails over, since the server may have received the request.
+
+        When the map has no opinion, ``requests`` decides from the session's,
+        the call's and the environment's ``proxies``, as without this adapter
+        -- except that a proxylib value there (a PAC result such as ``"PROXY
+        a:1; DIRECT"``, a list of proxies, a ``Proxy`` or a ``ProxyDict``) is
+        resolved and failed over the same way. A caller's own entry at the
+        ``scheme://hostname`` key ``requests`` reads first still wins over the
+        map.
         """
 
-        def __init__(self, proxymap: ProxyMap, *args: Any, **kwargs: Any) -> None:
+        def __init__(
+            self,
+            proxymap: ProxyMap,
+            *args: Any,
+            failover: bool = True,
+            bad_proxy_ttl: float = 300.0,
+            **kwargs: Any,
+        ) -> None:
             self.proxymap = proxymap
+            self.failover = failover
+            self.bad_proxy_ttl = bad_proxy_ttl
             super().__init__(*args, **kwargs)
 
-        def send(self, request: "PreparedRequest", **kwargs: Any):
+        def _entries(self, url: str, proxies: Any) -> "Optional[Tuple[Tuple[Optional[Proxy], ...], bool]]":
+            """The entries to try and whether they outrank the caller's
+            ``proxies``; ``None`` leaves the request to requests."""
             try:
-                entries = lookup(self.proxymap, request.url)
+                return lookup(self.proxymap, url), False
             except KeyError:
-                # No opinion: requests decides from `proxies` (the session's,
-                # the call's and the environment's), untouched.
-                return super().send(request, **kwargs)
+                pass
+            if isinstance(proxies, ProxyDict):
+                try:
+                    return lookup(proxies.proxymap, url), True
+                except KeyError:
+                    return None
+            value = select_proxy(url, proxies) if proxies else None
+            if isinstance(value, str) and not _is_chain(value):
+                return None
+            return (_normalise(value), True) if value else None
+
+        def send(self, request: "PreparedRequest", **kwargs: Any):
+            proxies = kwargs.get("proxies") or {}
             parts = urlsplit(request.url)
-            if parts.hostname:
-                resolved = entries[0]
-                # scheme://hostname is the most specific key select_proxy()
-                # reads, so it outranks the scheme-level keys requests adds
-                # from the environment; a caller's own entry for that key
-                # still wins. None means DIRECT. The caller's proxies may be
-                # any mapping (a ProxyDict), so they are layered, not copied.
-                ours = {f"{parts.scheme}://{parts.hostname}": resolved.uri() if resolved is not None else None}
-                kwargs["proxies"] = ChainMap(kwargs.get("proxies") or {}, ours)
-            return super().send(request, **kwargs)
+            found = self._entries(request.url, proxies) if parts.hostname else None
+            if found is None:
+                return super().send(request, **kwargs)
+            entries, ours_first = found
+            # scheme://hostname is the most specific key select_proxy() reads.
+            # The caller's proxies may be any mapping (a ProxyDict), so they
+            # are layered, not copied.
+            key = f"{parts.scheme}://{parts.hostname}"
+            candidates = _net.order_by_health(entries) if self.failover else list(entries[:1])
+            for index, entry in enumerate(candidates):
+                ours = {key: entry.uri() if entry is not None else None}
+                kwargs["proxies"] = ChainMap(ours, proxies) if ours_first else ChainMap(proxies, ours)
+                try:
+                    return super().send(request, **kwargs)
+                except Exception as exc:
+                    if not (self.failover and failed_before_sending(exc)):
+                        raise
+                    _net.mark_bad(entry, ttl=self.bad_proxy_ttl)
+                    if index == len(candidates) - 1:
+                        raise
 
     return ProxyMapAdapter
+
+
+def _is_chain(value: str) -> bool:
+    """A proxies value that is a PAC result, not a proxy URL."""
+    return ";" in value or _PAC_RESULT.match(value) is not None
 
 
 def __getattr__(name: str) -> Any:

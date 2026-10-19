@@ -152,3 +152,86 @@ def test_requests_get_with_proxydict_over_env_config_reaches_local_server(http_s
         http_server.url("/"), proxies=ProxyDict(EnvProxyConfig({})), timeout=5
     )
     assert response.text == "ok"
+
+
+# ---- failover --------------------------------------------------------------------
+
+
+@pytest.fixture
+def tried(monkeypatch):
+    """The proxy (or None for DIRECT) each HTTPAdapter.send attempt used."""
+    from requests.adapters import HTTPAdapter
+    from requests.utils import select_proxy
+
+    attempts = []
+    original = HTTPAdapter.send
+
+    def send(self, request, **kwargs):
+        attempts.append(select_proxy(request.url, kwargs.get("proxies") or {}))
+        return original(self, request, **kwargs)
+
+    monkeypatch.setattr(HTTPAdapter, "send", send)
+    return attempts
+
+
+def _session(adapter):
+    session = requests.Session()
+    session.trust_env = False
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def test_a_dead_proxy_fails_over_and_is_skipped_next_time(http_server, dead_port, no_proxy_env, tried):
+    http_server.route("/ok", b"fine")
+    dead = f"http://127.0.0.1:{dead_port}"
+    session = _session(ProxyMapAdapter(SimpleProxyMap(f"PROXY 127.0.0.1:{dead_port}; DIRECT")))
+    with session:
+        assert session.get(http_server.url("/ok"), timeout=10).text == "fine"
+        assert tried == [dead, None]
+        tried.clear()
+        assert session.get(http_server.url("/ok"), timeout=10).status_code == 200
+        assert tried == [None]
+
+
+def test_without_failover_the_first_error_is_raised(http_server, dead_port, no_proxy_env, tried):
+    session = _session(ProxyMapAdapter(SimpleProxyMap(f"PROXY 127.0.0.1:{dead_port}; DIRECT"), failover=False))
+    with session, pytest.raises(requests.exceptions.ProxyError):
+        session.get(http_server.url("/ok"), timeout=10)
+    assert len(tried) == 1
+
+
+def test_a_read_timeout_never_fails_over(http_server, no_proxy_env, tried):
+    http_server.route("/slow", b"late", delay=1.0)
+    session = _session(ProxyMapAdapter(SimpleProxyMap("DIRECT; DIRECT")))
+    with session, pytest.raises(requests.exceptions.ReadTimeout):
+        session.get(http_server.url("/slow"), timeout=(5, 0.2))
+    assert tried == [None]
+
+
+class _NoOpinion:
+    def __getitem__(self, url):
+        raise KeyError(url)
+
+
+def test_a_chain_in_proxies_is_resolved_and_failed_over(http_server, dead_port, no_proxy_env, tried):
+    http_server.route("/ok", b"fine")
+    session = _session(ProxyMapAdapter(_NoOpinion()))
+    with session:
+        response = session.get(http_server.url("/ok"), proxies={"http": f"PROXY 127.0.0.1:{dead_port}; DIRECT"}, timeout=10)
+    assert response.status_code == 200
+    assert tried == [f"http://127.0.0.1:{dead_port}", None]
+
+
+def test_a_proxydict_in_proxies_keeps_its_whole_answer(http_server, dead_port, no_proxy_env, tried):
+    http_server.route("/ok", b"fine")
+    proxies = ProxyDict(SimpleProxyMap(f"PROXY 127.0.0.1:{dead_port}; DIRECT"))
+    with _session(ProxyMapAdapter(_NoOpinion())) as session:
+        assert session.get(http_server.url("/ok"), proxies=proxies, timeout=10).status_code == 200
+    assert tried == [f"http://127.0.0.1:{dead_port}", None]
+
+
+def test_a_plain_proxy_url_in_proxies_is_left_to_requests(http_server, dead_port, no_proxy_env, tried):
+    with _session(ProxyMapAdapter(_NoOpinion())) as session, pytest.raises(requests.exceptions.ProxyError):
+        session.get(http_server.url("/ok"), proxies={"http": f"http://127.0.0.1:{dead_port}"}, timeout=10)
+    assert len(tried) == 1

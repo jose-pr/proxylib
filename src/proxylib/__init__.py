@@ -28,6 +28,7 @@ from .proxy import ProxyMap as ProxyMap
 from .proxy import SimpleProxyMap as SimpleProxyMap
 from .proxy import ProxyAnswer as ProxyAnswer
 from .proxy import ProxyLike as ProxyLike
+from .proxy import alookup as alookup
 from .proxy import lookup as lookup
 from .system import ProxyConfig as ProxyConfig
 from .system import auto_proxy as auto_proxy
@@ -63,6 +64,7 @@ __all__ = (
     "Probed",
     "RoundRobin",
     "SimpleProxyMap",
+    "alookup",
     "auto_proxy",
     "clear_caches",
     "configure",
