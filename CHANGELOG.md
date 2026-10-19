@@ -153,6 +153,13 @@ maps every removed or renamed 1.x name to its 2.0 form.
   DIRECT). `ProxyMapAdapter` passes a `proxies` mapping of any type through (a
   `ProxyDict` included) instead of copying it into a `dict`.
 - WPAD and PAC `dnsResolve` lookups are bounded by a timeout.
+- `weekdayRange`, `dateRange` and `timeRange` answer as Chromium's PAC library (shared
+  with Firefox): `dateRange` handles every combination of days, months and years (two-value
+  forms such as `dateRange(24, "DEC")` were always false), `timeRange(h1, h2)` no longer
+  wraps past midnight (`timeRange(22, 0, 6, 0)` does), and an unknown day or month name is
+  false instead of an error.
+- `PacProxyMap` over a Python function: whatever the function raises becomes `PACError`
+  (a `KeyError` from it was read as "no opinion").
 - `auto_proxy(*, system=True, no_proxy=None, wpad=False, timeout=10.0,
   on_missing_engine="raise", environ=None)`. The proxy environment variables come
   first on every OS: when any is set they alone decide, and the OS is not consulted

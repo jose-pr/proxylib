@@ -321,13 +321,19 @@ PacProxyMap(script, *, browser_compatibility=False)
 The proxy map; `script` is a `PacScript` or any `callable(url, host) -> str` (a Python
 `FindProxyForURL`). `host` is the URL's host, lower-cased; `browser_compatibility=True`
 reduces an `https` URL to `https://host/` (the Chrome and Firefox privacy rule). Answers
-through `Proxy.parse_pac_result`; never `KeyError`. `close()` ends the script's helper.
+through `Proxy.parse_pac_result`; never `KeyError` — whatever a Python function raises
+becomes `PACError`, as a script error does. `close()` ends the script's helper.
 
 - `functions` — read-only mapping of the PAC builtins by their PAC names: the Netscape
   set (`dnsResolve`, `myIpAddress`, `isInNet`, `shExpMatch`, `dnsDomainIs`,
   `weekdayRange`, `dateRange`, `timeRange`, …) plus Microsoft's `*Ex` functions,
   `sortIpAddressList` and `getClientVersion`. `dnsResolve` caches answers and failures
-  for 30 s.
+  for 30 s. `weekdayRange`, `dateRange` and `timeRange` answer as Chromium's PAC library
+  (shared with Firefox) does, so a PAC behaves as in a browser: `timeRange(9, 17)` runs
+  to 17:59:59 and the hour form does not wrap (`timeRange(22, 6)` is never true; write
+  `timeRange(22, 0, 6, 0)`); `dateRange(24, "DEC")` — a day with one other value — keeps
+  both ends in the current month, so it is true from the 24th to the month's end; an
+  unknown day or month name is false.
 - `proxylib.pac.engines` — `names()` (installed engines), `get_engine(name=None)`, the
   `JSEngine` protocol. Selection: `engine=`, else `PROXYLIB_JS_ENGINE`, else quickjs
   then dukpy; an unknown name raises `ValueError`. Neither engine is imported until a
