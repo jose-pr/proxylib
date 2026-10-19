@@ -7,10 +7,9 @@ interpreter start, and importing proxylib registers the same hooks. The
 integration asks the client's *active map*: the newest :func:`patch` that
 covers it, else its default.
 
-``PROXYLIB_IMPORTPATCH`` chooses the defaults, as syshttp's
-``SYSHTTP_IMPORTPATCH`` does: ``1``/``true``/``yes``/``on`` for every target,
-or target names separated by commas or spaces (``requests, httpx``; a client's
-module name, such as ``urllib.request``, works too). A named target's default is
+``PROXYLIB_IMPORTPATCH`` chooses the defaults: ``1``/``true``/``yes``/``on``
+for every target, or target names separated by ``:`` (``requests:httpx``; a
+client's module name, such as ``urllib.request``, works too). A named target's default is
 :func:`~proxylib.auto_proxy`. Unset or empty, nothing is named: ``requests`` and
 ``urllib`` still get the integration, with a default that has no opinion, so
 they choose their proxy exactly as without proxylib; ``httpx`` and
@@ -22,7 +21,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import re
 import sys
 import threading
 import warnings
@@ -76,7 +74,8 @@ def _setting() -> _Setting:
     by_module = {target.module: name for name, target in _registry.items()}
     by_module["urllib.request"] = "urllib"
     names = set()
-    for part in re.split(r"[\s,]+", raw):
+    for part in raw.split(":"):
+        part = part.strip()
         if not part:
             continue
         name = by_module.get(part, part)
@@ -285,8 +284,8 @@ def unpatch() -> None:
 def register_patcher(
     name: str,
     install: InstallFunc,
-    uninstall: UninstallFunc,
     *,
+    uninstall: UninstallFunc,
     module: str,
     unnamed: bool = False,
     replace: bool = False,
@@ -446,7 +445,7 @@ def _uninstall_aiohttp() -> None:
         _aiohttp_request = None
 
 
-register_patcher("requests", _install_requests, _uninstall_requests, module="requests.sessions", unnamed=True)
-register_patcher("urllib", _install_urllib, _uninstall_urllib, module="urllib.request", unnamed=True)
-register_patcher("httpx", _install_httpx, _uninstall_httpx, module="httpx")
-register_patcher("aiohttp", _install_aiohttp, _uninstall_aiohttp, module="aiohttp")
+register_patcher("requests", _install_requests, uninstall=_uninstall_requests, module="requests.sessions", unnamed=True)
+register_patcher("urllib", _install_urllib, uninstall=_uninstall_urllib, module="urllib.request", unnamed=True)
+register_patcher("httpx", _install_httpx, uninstall=_uninstall_httpx, module="httpx")
+register_patcher("aiohttp", _install_aiohttp, uninstall=_uninstall_aiohttp, module="aiohttp")

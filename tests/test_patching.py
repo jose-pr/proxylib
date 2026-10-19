@@ -103,7 +103,7 @@ def _client(tmp_path, monkeypatch, name):
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.delitem(sys.modules, name, raising=False)
     calls = []
-    register_patcher(name, calls.append, lambda: calls.append("uninstalled"), module=name, unnamed=True)
+    register_patcher(name, calls.append, uninstall=lambda: calls.append("uninstalled"), module=name, unnamed=True)
     return calls
 
 
@@ -124,15 +124,15 @@ def test_a_registered_client_is_installed_once_when_imported(tmp_path, monkeypat
 def test_registering_a_name_twice_needs_replace(tmp_path, monkeypatch):
     _client(tmp_path, monkeypatch, "ip_client_b")
     with pytest.raises(ValueError, match="already registered"):
-        register_patcher("ip_client_b", print, print, module="ip_client_b")
-    register_patcher("ip_client_b", print, print, module="ip_client_b", replace=True)
+        register_patcher("ip_client_b", print, uninstall=print, module="ip_client_b")
+    register_patcher("ip_client_b", print, uninstall=print, module="ip_client_b", replace=True)
     with pytest.raises(ValueError):
-        register_patcher("requests", print, print, module="requests")
+        register_patcher("requests", print, uninstall=print, module="requests")
     assert {"requests", "urllib", "ip_client_b"} <= set(patching.targets())
 
 
 def test_naming_a_client_that_is_not_installed_raises(monkeypatch):
-    register_patcher("ip_missing", print, print, module="ip_missing_client.sub")
+    register_patcher("ip_missing", print, uninstall=print, module="ip_missing_client.sub")
     with pytest.raises(MissingExtraError) as info:
         patch(A, targets=["ip_missing"])
     assert info.value.name == "ip_missing_client"
@@ -213,8 +213,8 @@ def test_importpatch_off_installs_nothing_until_patch_is_called():
         ("1", {"requests", "urllib", "httpx", "aiohttp"}),
         ("TRUE", {"requests", "urllib", "httpx", "aiohttp"}),
         ("", set()),
-        ("requests, urllib.request httpx", {"requests", "urllib", "httpx"}),
-        ("aiohttp,,", {"aiohttp"}),
+        ("requests:urllib.request:httpx", {"requests", "urllib", "httpx"}),
+        (" aiohttp :: ", {"aiohttp"}),
     ],
 )
 def test_importpatch_names_the_clients_that_use_auto_proxy(value, auto):
@@ -224,7 +224,7 @@ def test_importpatch_names_the_clients_that_use_auto_proxy(value, auto):
 
 
 def test_an_unknown_name_warns():
-    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_IMPORTPATCH="requests,pycurl")
+    result = _run("import proxylib.patching as p; print(p.active('requests'))", PROXYLIB_IMPORTPATCH="requests:pycurl")
     assert result.stdout.strip() == "<auto_proxy()>"
     assert "PROXYLIB_IMPORTPATCH names 'pycurl'" in result.stderr
 
