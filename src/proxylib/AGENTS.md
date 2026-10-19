@@ -364,7 +364,8 @@ Each client gets proxylib's integration **once**, and it always asks the client'
 **active map**: the newest `patch()` covering it, else its default. Built-in targets:
 
 - `"requests"` — new `requests.Session`s mount a `ProxyMapAdapter` for `http://` and
-  `https://`;
+  `https://`; the caller's own `proxies` beat the map, and a session with
+  `trust_env=False` is left to requests (Client integrations);
 - `"urllib"` — a global opener with a `ProxyMapHandler`, installed only when the
   program has not installed its own;
 - `"httpx"` — `httpx.Client`/`AsyncClient` made without `transport`, `proxy`,
@@ -446,10 +447,16 @@ ProxyMapAdapter(proxymap, *args, failover=True, bad_proxy_ttl=300.0, **kwargs)  
 
 A `requests.adapters.HTTPAdapter` subclass hooking `send()`, so it sees the real
 request URL. Looking the name up imports requests; constructing it without requests
-raises `MissingExtraError`. A `ProxyDict` given as the whole `proxies`, and a caller's
-`proxies` entry at the `scheme://hostname` key requests reads first, win over the map
-(the caller's entry is sent as is, without failover); a less specific key (bare
-`"http"`, or one requests adds from the environment) does not. When the map has no
+raises `MissingExtraError`. **The caller's own proxies win over the map**: a `ProxyDict`
+given as the whole `proxies`, or an entry for the URL — under any key requests reads
+(`"http"`, `"all"`, `"http://host"`) — in the call's `proxies=` or the session's
+`proxies`; requests then sends it as given (a proxylib value there is still read).
+Entries requests adds from the environment do not win. Telling the two apart needs the
+session's `request`/`send` wrapped, which the requests patch target does (the default);
+for an adapter used outside such a session, only a `scheme://hostname` entry wins. A
+session with `trust_env=False` ignores the map of the adapters the patch target mounts
+(the environment's or the OS's proxy, or a `patch()`), as requests ignores the
+environment; an adapter the program mounts itself keeps its map. When the map has no
 opinion, requests decides from its `proxies` as usual — but a proxylib value there (a
 PAC result such as `"PROXY a:1; DIRECT"`, a list of proxies, or a `Proxy`) is resolved
 and failed over; a plain proxy URL stays requests' own.
