@@ -59,28 +59,30 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 - **`ChainProxyMap(*maps)`** — asks each map in order through `lookup`; the first
   with an opinion answers (DIRECT included). If every map has no opinion, neither
   does the chain. Links can be `dict`s.
-- **`Bypass(inner, rules)`** (`proxylib.wrappers`) — `(None,)` for a URL `rules`
-  matches (`BypassRules`, `NO_PROXY` text, or its entries; loopback included unless
-  `<-loopback>`), else `lookup(inner, url)`.
-- **`ConfigurableProxyMap(proxymap, *, cache_ttl=None, probe=False, probe_timeout=5.0,
-  round_robin=False, browser_compatibility=False, bypass_local=False, no_proxy=None,
-  cache_maxsize=1024)`**
-  — decorates any `ProxyMap` with independent opt-in features:
-  - `cache_ttl` (seconds, `None`/falsy disables) — per-effective-URL cache of the
-    decorated map's answer, at most `cache_maxsize` URLs (least recently used dropped
-    first); `clear_cache()`.
-  - `probe=True` — resolves to the first entry whose port accepts a TCP connection
-    (unreachable proxies are skipped for 30 s); nothing reachable becomes `KeyError`
-    here, not a silent DIRECT.
-  - `round_robin=True` — rotates the result tuple each call, cached or not, so a
-    different entry leads while preserving the rest as fallback (thread-safe).
-  - `browser_compatibility=True` — strips path/query/fragment from HTTPS URLs before
-    delegating and before computing the cache key (matches Chrome/Firefox PAC privacy
-    behavior).
-  - `bypass_local=True` — bypasses loopback/link-local/same-subnet addresses (shorthand
-    for `no_proxy=["<local>"]`).
-  - `no_proxy` — extra bypass rules (same syntax as `NO_PROXY`), checked before
-    delegating to `proxymap`.
+- **Wrappers** (`proxylib.wrappers`, all at top level) — proxy maps over any inner map
+  (a `dict` included), read through `lookup`; the inner map's `KeyError` (no opinion)
+  passes through. Compose them in the order you mean: `RoundRobin(Cached(m, ttl=60))`
+  rotates the cached answer.
+  - **`Bypass(inner, rules)`** — `(None,)` for a URL `rules` matches (`BypassRules`,
+    `NO_PROXY` text, or its entries; loopback included unless `<-loopback>`), else
+    `lookup(inner, url)`. Loopback/link-local/same-subnet hosts: the `<subnet>` token.
+  - **`Cached(inner, *, ttl, maxsize=1024)`** — the inner answer per URL for `ttl`
+    seconds, at most `maxsize` URLs (least recently used dropped first); no opinion is
+    not cached; thread-safe; `.clear()`, `len()`. `ttl <= 0` or `maxsize < 1` raises
+    `ValueError`.
+  - **`RoundRobin(inner)`** — rotates the answer one place per lookup, so successive
+    requests lead with a different entry and keep the rest as fallbacks; one rotation
+    per distinct answer (the 1024 most recent), shared by every URL with that answer;
+    thread-safe. A one-entry answer is unchanged.
+  - **`Probed(inner, *, timeout=5.0)`** — `(first reachable entry,)`: the first whose
+    port accepts a TCP connection within `timeout` (DIRECT counts as reachable; a
+    failed proxy is skipped for 30 s). None reachable → **`NoReachableProxyError`** (a
+    `LookupError`, not `KeyError`).
+  - **`configure(inner, *, bypass=None, cache_ttl=None, round_robin=False, probe=False,
+    probe_timeout=5.0) -> ProxyMap`** — the asked-for wrappers in one fixed order,
+    outermost first: `Bypass`; then `Probed(RoundRobin(Cached(inner)))` when rotating
+    (each lookup probes the rotated answer), else `Cached(Probed(inner))` (the probed
+    answer is cached). With nothing asked for, returns `inner`.
 
 ## Bypass rules (`proxylib.bypass`, re-exported at top level)
 
@@ -248,25 +250,41 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
   fails to download or run is skipped. Results, failures included, are cached per
   fqdn. **DHCP option 252 is not implemented.**
 
-## Global patching (`proxylib.patching`)
+## Patching clients (`proxylib.patching`; `patch`, `unpatch`, `Patch`, `register_patcher` at top level)
 
-- **`patch(proxymap, targets=None)`** — globally wires `proxymap` into `targets`
-  (default: every registered target — built-in `"requests"` and `"urllib"`, if
-  `requests` is importable). Calling this while already patched **replaces** the
-  previous patch (with a warning), not a stack — one active resolver at a time. A
-  partial failure (unknown target, or a patch function that raises) rolls back
-  whatever did apply before propagating.
-- **`unpatch()`** — undoes whatever `patch()` last applied, in reverse order.
-  Idempotent (no-op if nothing is patched).
-- **`register_patcher(name, patch_func, unpatch_func)`** — register a custom
-  integration. `patch_func(proxymap)` applies it; `unpatch_func()` (no args — capture
-  state in a closure) undoes it. Re-registering an existing `name` replaces it.
-- `patch(proxymap)` with no `targets` skips a built-in target whose client is not
-  installed; naming it in `targets` raises `MissingExtraError`.
-- Built-in targets: `"requests"` wraps `requests.Session.__init__` so newly constructed
-  sessions mount a `ProxyMapAdapter` (sessions created *before* `patch()` are
-  untouched); `"urllib"` installs a global opener via
-  `urllib.request.install_opener(...)`.
+- **How it works.** Each client — built in: `"requests"` (new `requests.Session`s mount a
+  `ProxyMapAdapter` for `http://` and `https://`) and `"urllib"` (a global opener with a
+  `ProxyMapHandler`, installed only when the program has not installed its own) — gets
+  proxylib's integration **once**, and it always asks the **active map**: the newest
+  `patch()` covering that client, else the **default**.
+- **When.** At `import proxylib` for clients already imported, and through an import
+  hook for the rest (so `import proxylib` never imports `requests`). With the **`patch`
+  extra** (`importpatch>=0.2,<0.3`), proxylib's `importpatch` entry points
+  (`requests`, `urllib.request` = `proxylib.integrations.autopatch`) install it whenever
+  the client is imported, in any program of the environment, even one that never
+  imports proxylib.
+- **The default map** depends on `PROXYLIB_AUTO_PATCH` (read when the integration is
+  installed): unset or empty → **no opinion**, so the client chooses its proxy exactly as
+  it would without proxylib (requests from its `proxies` and the environment, urllib from
+  `urllib.request.getproxies()`); `1`/`true`/`yes`/`on` → **`auto_proxy()`** (built on the
+  first lookup); `0`/`false`/`no`/`off` → nothing is installed until `patch()` is called.
+  Any other value warns and is ignored.
+- **`patch(proxymap, *, targets=None) -> Patch`** — makes `proxymap` the active map of
+  every client in `targets` (default: all registered) until undone. Patches nest; the
+  newest covering a client wins. A named target whose client is not installed raises
+  `MissingExtraError` (with the default, it is skipped); an unknown name raises
+  `ValueError`. Naming a target imports its client.
+- **`Patch`** — `.undo()` (newest first: undoing one a later patch still covers raises
+  `RuntimeError`; undoing an ended patch does nothing), a context manager (`with
+  patch(m):` undoes on exit), `.active`, `.proxymap`, `.targets` (`None` = all).
+- **`unpatch()`** — ends every patch; every client is back on the default map. The
+  integrations stay installed (they behave as without proxylib under the default).
+- **`active(target) -> ProxyMap`** — the map `target`'s client uses now.
+- **`register_patcher(name, install, uninstall, *, module, replace=False)`** — a client
+  integration. `install(proxymap)` is called once, when module `module` has been
+  imported, with a map that always answers as the active map does; `uninstall()`
+  removes it. An existing `name` raises `ValueError` unless `replace=True`.
+  **`targets()`** lists the names.
 
 ## `requests`/`urllib` integrations (`proxylib.integrations`)
 
@@ -279,7 +297,8 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 - **`ProxyMapHandler(proxymap)`** (`.urllib`) — a `urllib.request.ProxyHandler`
   subclass; resolves per-request from `proxymap` instead of a static dict.
   `http_open`/`https_open`/`ftp_open` all bind the same resolver. Returning DIRECT
-  falls through to the default (non-proxying) handler.
+  falls through to the default (non-proxying) handler; no opinion (`KeyError`) uses the
+  proxy `urllib.request.getproxies()` names for the scheme, as the standard handler would.
 - **`ProxyDict(proxymap)`** (`.dict`) — duck-types the plain `{scheme_or_url:
   "proxy://uri"}` dict `requests`-like libraries accept. **Composes**, doesn't subclass,
   `ProxyMap` (`__getitem__` returns `str`, an LSP violation if it were a `ProxyMap`
@@ -298,7 +317,7 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 - **`PACError(ProxylibError)`** — a PAC script raised, ran out of time, or could not be
   loaded as a script.
 - **`NoReachableProxyError(ProxylibError, LookupError)`** — no offered proxy accepted a
-  connection (`ConfigurableProxyMap(probe=True)` turns it into `KeyError`).
+  connection (`Probed`).
 - **`MissingExtraError(ProxylibError, ImportError)`** — an optional dependency is not
   installed; `.extra` is the proxylib extra (or `None`), `.name` the missing module, and
   the message gives the `pip install` line.
@@ -308,8 +327,8 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
 
 - **`clear_caches()`** (top level) — drops every cache proxylib keeps: downloaded PAC
   scripts, PAC `dnsResolve` answers, WPAD results, GNOME/MATE settings, local
-  interfaces and the unreachable-proxy blacklist. (`ConfigurableProxyMap` instances
-  keep their own cache: `clear_cache()`.)
+  interfaces and the unreachable-proxy blacklist. (A `Cached` map keeps its own:
+  `.clear()`.)
 
 ## Package metadata
 
@@ -318,4 +337,5 @@ answer; `EnvProxyConfig` raises `KeyError` for a scheme with no proxy variable s
   time and never drifts from `pyproject.toml`.
 - **Dependencies** — one required: `netimps>=0.4.0,<0.5` (network helpers, no
   dependencies of its own). `import proxylib` imports neither it nor any optional
-  client library; each is imported when first used. Extras: `pac` (quickjs), `dukpy`.
+  client library; each is imported when first used. Extras: `pac` (quickjs), `dukpy`,
+  `patch` (importpatch: patch clients in every program, see Patching clients).

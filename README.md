@@ -49,13 +49,14 @@ One required runtime dependency, [`netimps`](https://pypi.org/project/netimps/) 
   proxy from the real request URL (not just scheme+host).
 - **`urllib.request` integration** — `ProxyMapHandler`, the same idea as
   `ProxyMapAdapter` but for the standard library's opener/handler system.
-- **Global patching** — `proxylib.patch(proxymap)` wires an active `ProxyMap` into
-  newly created `requests.Session`s and a global `urllib` opener, without mounting an
-  adapter by hand; `proxylib.unpatch()` undoes it.
-- **Decorators & composition** — `ChainProxyMap` for sequential fallback across
-  multiple `ProxyMap`s, and `ConfigurableProxyMap` for opt-in caching, active
-  reachability probing (with a circuit breaker for dead proxies), round-robin
-  selection, browser-style HTTPS privacy stripping, and local-address bypass.
+- **Patched clients that behave as before** — importing proxylib gives `requests` and
+  `urllib` its adapter and handler, which choose exactly the proxy they always did until
+  you call `proxylib.patch(proxymap)` (nestable: `with proxylib.patch(m): ...`). Set
+  `PROXYLIB_AUTO_PATCH=1` to use `auto_proxy()` everywhere; install `proxylib[patch]` to
+  patch clients in programs that never import proxylib.
+- **Composable wrappers** — `ChainProxyMap` for fallback across maps; `Bypass`,
+  `Cached`, `RoundRobin` and `Probed` (reachability probing with a circuit breaker),
+  composed in the order you write them or with `configure()`.
 
 ## Installation
 
@@ -124,18 +125,26 @@ urllib.request.install_opener(opener)
 from the `ProxyMap` instead of a static `{scheme: proxy_url}` dict, for the same reason
 `ProxyMapAdapter` exists for `requests`.
 
-### ...or patch every new `requests.Session`/`urllib` opener at once
+### ...or patch `requests` and `urllib` everywhere
+
+Importing proxylib already gives new `requests.Session`s and urllib's default opener
+proxylib's adapter and handler; until you patch, they pick the proxy exactly as
+without proxylib.
 
 ```python
 import proxylib
 
-proxylib.patch(proxylib.auto_proxy())
-requests.get("https://example.com")  # any new Session picks up the active proxy
-proxylib.unpatch()
+with proxylib.patch(proxylib.auto_proxy()):
+    requests.get("https://example.com")  # resolved by auto_proxy()
+# back to requests' own choice here; proxylib.unpatch() ends every patch
 ```
 
-Pass `targets=["requests"]`/`["urllib"]` to patch just one. Sessions created *before*
-`patch()` are untouched.
+Patches nest (the newest wins), and `targets=["requests"]` or `["urllib"]` limits one
+to a client. `PROXYLIB_AUTO_PATCH=1` makes `auto_proxy()` the default without any
+code, and `PROXYLIB_AUTO_PATCH=0` turns the default integration off. With
+`pip install "proxylib[patch]"`, the integration is installed whenever `requests` or
+`urllib.request` is imported, even in programs that never import proxylib (through
+[importpatch](https://pypi.org/project/importpatch/)).
 
 ### From environment variables
 
@@ -195,11 +204,11 @@ lookup(proxymap, "https://example.com/")  # -> (Proxy(scheme='http', host='corp-
 
 | Module | Purpose |
 | --- | --- |
-| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, `ConfigurableProxyMap`, URI parsing |
-| `proxylib.patching` | `patch()` / `unpatch()` / `register_patcher()` — global patching registry |
+| `proxylib.proxy` | Core types: `Proxy`, `ProxyMap` (protocol + factory), `SimpleProxyMap`, `ChainProxyMap`, `lookup()` |
+| `proxylib.patching` | `patch()` / `Patch` / `unpatch()` / `register_patcher()` — client integrations and the active map |
 | `proxylib.env` | `EnvProxyConfig` — `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` |
 | `proxylib.system` | `auto_proxy()`, `system_config()`, `ProxyConfig`, and the OS resolvers `WinHTTPProxyMap`, `CFNetworkProxyMap`, `LibProxyMap` |
-| `proxylib.wrappers` | `Bypass` — maps that wrap another map |
+| `proxylib.wrappers` | `Bypass`, `Cached`, `RoundRobin`, `Probed`, `configure()` — maps that wrap another map |
 | `proxylib.pac` | `PacScript`, `PacProxyMap`, `load()`, `loads()`, `functions` — PAC scripts and builtins |
 | `proxylib.pac.wpad` | `discover()` — DNS+HTTP WPAD auto-discovery |
 | `proxylib.pac.engines` | `JSEngine` interface, `names()`, engine selection |
@@ -270,8 +279,8 @@ published to GitHub Pages on every release (see above). To preview locally:
 - **No automatic proxy failover in the adapters themselves** — `ProxyMapAdapter`/
   `ProxyMapHandler` use the first proxy a `ProxyMap` returns; they don't retry the rest
   of a `PROXY a; PROXY b; DIRECT` chain on connection failure. Wrap your map with
-  `ConfigurableProxyMap(proxymap, probe=True)` (active reachability probing, with a
-  circuit breaker for proxies that keep failing) to pre-select a reachable entry.
+  `Probed(proxymap)` (active reachability probing, with a circuit breaker for proxies
+  that keep failing) to pre-select a reachable entry.
 
 ## License
 

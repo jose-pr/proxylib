@@ -43,8 +43,22 @@ Work toward 2.0, which breaks the 1.x API.
   `pac_script`, per-scheme `proxies` plus a `"socks"` fallback, and `bypass`).
   `ProxyConfig.to_proxymap()` builds the map: WPAD, then the PAC, then the proxies,
   each passing to the next when it fails.
-- `Bypass(inner, rules)` (`proxylib.wrappers`) answers DIRECT for the URLs `rules`
-  match.
+- Wrappers in `proxylib.wrappers`, composed in the order written: `Bypass(inner,
+  rules)`, `Cached(inner, ttl=, maxsize=1024)`, `RoundRobin(inner)` and
+  `Probed(inner, timeout=5.0)`, plus `configure()` for the common combination.
+  `Probed` raises `NoReachableProxyError` when nothing is reachable (it was `KeyError`).
+- `patch()` returns a `Patch` handle: patches nest (`with patch(a): with patch(b):`
+  restores `a` after the inner block), `undo()` ends one, and `unpatch()` ends all.
+  `patching.active(target)` is the map a client uses now; `patching.targets()` lists
+  the clients.
+- Importing proxylib gives `requests` (new sessions) and `urllib` (its default opener,
+  when the program has not installed its own) proxylib's adapter and handler. Until
+  `patch()` is called they choose the proxy exactly as the client would on its own.
+  `PROXYLIB_AUTO_PATCH=1` makes `auto_proxy()` the default; `PROXYLIB_AUTO_PATCH=0`
+  installs nothing until `patch()`.
+- The `patch` extra (`importpatch`) installs that integration whenever `requests` or
+  `urllib.request` is imported, in any program of the environment, through the
+  `importpatch` entry point `proxylib.integrations.autopatch`.
 - The system backends log their decisions at DEBUG on the `proxylib.system` logger.
 
 ### Changed
@@ -68,7 +82,6 @@ Work toward 2.0, which breaks the 1.x API.
   and curl order); a PAC URL may be given as a proxy value.
 - `<local>` in a bypass list now means a host name without a dot (its WinINet
   meaning); the 1.x meaning (loopback, link-local or same subnet) is `<subnet>`.
-  `ConfigurableProxyMap(bypass_local=True)` uses `<subnet>`.
 - Loopback (`localhost`, `127.0.0.0/8`, `::1`) bypasses the proxy wherever bypass
   rules apply, unless `<-loopback>` is listed. In `NO_PROXY`, `*` among other
   entries is ignored with a warning, as curl and requests do.
@@ -89,9 +102,17 @@ Work toward 2.0, which breaks the 1.x API.
   dukpy one; `jspac`, `quickjs` and `ifaddr` are gone.
 - `ProxyMapAdapter` is always a class: constructing it without `requests`
   raises `MissingExtraError` instead of the name being `None`.
-- `patch()` registers its `"requests"` target whether or not `requests` is
-  installed; with no `targets` a missing client is skipped, and naming it
-  raises `MissingExtraError`.
+- `patch(proxymap, *, targets=None)` no longer replaces the active patch with a warning;
+  patches stack. A patch now also reaches sessions created before it (the adapter asks
+  the active map on every request). With no `targets` a missing client is skipped;
+  naming it raises `MissingExtraError`.
+- `register_patcher(name, install, uninstall, *, module, replace=False)`: `install`
+  runs once when `module` is imported and receives a map that follows the active
+  patch; registering an existing name raises `ValueError` unless `replace=True`.
+- `ProxyMapHandler`: when the map has no opinion, the request uses
+  `urllib.request.getproxies()` for its scheme, as the standard handler does (it went
+  DIRECT). `ProxyMapAdapter` passes a `proxies` mapping of any type through (a
+  `ProxyDict` included) instead of copying it into a `dict`.
 - WPAD and PAC `dnsResolve` lookups are bounded by a timeout.
 - `auto_proxy(*, system=True, no_proxy=None, wpad=False, timeout=10.0,
   on_missing_engine="raise", environ=None)`. The proxy environment variables come
@@ -126,8 +147,11 @@ Work toward 2.0, which breaks the 1.x API.
   `Bypass(proxymap, rules)`).
 - `UriSplit`, `Proxy.from_str`, `Proxy.find_all` and `Proxy.as_uri`: use
   `Proxy.parse`, `Proxy.parse_pac_result` and `Proxy.uri`.
-- `proxylib.netutils` and the top-level `first_working_proxy`; use
-  `ConfigurableProxyMap(probe=True)` for reachability probing.
+- `proxylib.netutils` and the top-level `first_working_proxy`; use `Probed` for
+  reachability probing.
+- `ConfigurableProxyMap`: use the wrappers (`Cached`, `RoundRobin`, `Probed`,
+  `Bypass`) or `configure()`; `browser_compatibility` is on `PacProxyMap`, and
+  `bypass_local=True` is the `<subnet>` bypass token.
 - `system_proxy()` and `auto_proxy(provider=...)`: use `system_config()` and
   `auto_proxy(system=...)`. The `PROXY_PAC` variable: give the PAC location in
   `HTTP_PROXY` and the other proxy variables. `LibProxyMap` is no longer exported
