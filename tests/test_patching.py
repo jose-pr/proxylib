@@ -215,11 +215,12 @@ def test_importpatch_off_installs_nothing_until_patch_is_called():
 @pytest.mark.parametrize(
     "value, auto",
     [
-        ("1", {"requests", "urllib", "httpx", "aiohttp"}),
-        ("TRUE", {"requests", "urllib", "httpx", "aiohttp"}),
+        ("1", {"requests", "urllib", "httpx", "aiohttp", "pip"}),
+        ("TRUE", {"requests", "urllib", "httpx", "aiohttp", "pip"}),
         ("", set()),
         ("requests:urllib.request:httpx", {"requests", "urllib", "httpx"}),
         (" aiohttp :: ", {"aiohttp"}),
+        ("pip._vendor.requests:pip", {"pip"}),
     ],
 )
 def test_importpatch_names_the_clients_that_use_auto_proxy(value, auto):

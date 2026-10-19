@@ -19,6 +19,8 @@ they choose their proxy exactly as without proxylib; ``httpx`` and
 
 from __future__ import annotations
 
+import contextvars
+import functools
 import importlib.util
 import os
 import sys
@@ -73,6 +75,7 @@ def _setting() -> _Setting:
         return _Setting(False, frozenset(_registry))
     by_module = {target.module: name for name, target in _registry.items()}
     by_module["urllib.request"] = "urllib"
+    by_module["pip._vendor.requests"] = "pip"
     names = set()
     for part in raw.split(":"):
         part = part.strip()
@@ -452,7 +455,67 @@ def _uninstall_aiohttp() -> None:
         _aiohttp_request = None
 
 
+_pip_originals: "Optional[Tuple[type, Callable, Callable, type, Callable]]" = None
+
+# Whether the pip session sending the request trusts the environment: pip's
+# --proxy and --no-proxy-env turn trust_env off, and proxylib then stays out.
+_PIP_TRUST_ENV: "contextvars.ContextVar[bool]" = contextvars.ContextVar("proxylib_pip_trust_env", default=True)
+
+
+def _install_pip(proxymap: ProxyMap) -> None:
+    """Every HTTP adapter of pip's vendored requests routes through the active
+    map, with failover, gateways and proxy headers, as ``ProxyMapAdapter``
+    does, for a session that trusts the environment. pip mounts its own
+    adapters after ``Session.__init__``, so the hook is on the base
+    ``HTTPAdapter`` class; pip's TLS context reaches the proxy managers as
+    pip passes it."""
+    global _pip_originals
+    import pip._vendor.requests.sessions as sessions
+
+    from .integrations.requests import _toolkit
+
+    kit = _toolkit("pip._vendor.requests")
+    adapter = kit.HTTPAdapter
+    original_send, original_manager = adapter.send, adapter.proxy_manager_for
+    original_session_send = sessions.Session.send
+
+    def send(self, request, **kwargs):
+        if not _PIP_TRUST_ENV.get():
+            return original_send(self, request, **kwargs)
+        return kit.send(
+            functools.partial(original_send, self), request, kwargs, proxymap, failover=True, bad_proxy_ttl=300.0
+        )
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        return kit.proxy_manager_for(self, functools.partial(original_manager, self), proxy, proxy_kwargs)
+
+    def session_send(self, request, **kwargs):
+        token = _PIP_TRUST_ENV.set(bool(self.trust_env))
+        try:
+            return original_session_send(self, request, **kwargs)
+        finally:
+            _PIP_TRUST_ENV.reset(token)
+
+    for wrapper, original in ((send, original_send), (proxy_manager_for, original_manager), (session_send, original_session_send)):
+        wrapper.__wrapped__ = original  # type: ignore[attr-defined]
+    _pip_originals = (adapter, original_send, original_manager, sessions.Session, original_session_send)
+    adapter.send = send
+    adapter.proxy_manager_for = proxy_manager_for
+    sessions.Session.send = session_send
+
+
+def _uninstall_pip() -> None:
+    global _pip_originals
+    if _pip_originals is not None:
+        adapter, original_send, original_manager, session, original_session_send = _pip_originals
+        adapter.send = original_send
+        adapter.proxy_manager_for = original_manager
+        session.send = original_session_send
+        _pip_originals = None
+
+
 register_patcher("requests", _install_requests, uninstall=_uninstall_requests, module="requests.sessions", unnamed=True)
 register_patcher("urllib", _install_urllib, uninstall=_uninstall_urllib, module="urllib.request", unnamed=True)
 register_patcher("httpx", _install_httpx, uninstall=_uninstall_httpx, module="httpx")
 register_patcher("aiohttp", _install_aiohttp, uninstall=_uninstall_aiohttp, module="aiohttp")
+register_patcher("pip", _install_pip, uninstall=_uninstall_pip, module="pip._vendor.requests.sessions")

@@ -1,5 +1,6 @@
 """proxylib's ``importpatch`` entry point: installs proxylib's integration for
-a client (``requests``, ``urllib.request``, ``httpx``, ``aiohttp``) as soon
+a client (``requests``, ``urllib.request``, ``httpx``, ``aiohttp``, pip's
+vendored ``pip._vendor.requests``) as soon
 as it is imported, in any program of the environment, as
 ``PROXYLIB_IMPORTPATCH`` says (see :mod:`proxylib.patching`).
 

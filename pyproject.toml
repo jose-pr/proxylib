@@ -42,6 +42,7 @@ requests = "proxylib.integrations.autopatch"
 "urllib.request" = "proxylib.integrations.autopatch"
 httpx = "proxylib.integrations.autopatch"
 aiohttp = "proxylib.integrations.autopatch"
+"pip._vendor.requests" = "proxylib.integrations.autopatch"
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/proxylib/"
