@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-20
+
 ### Added
 
 - `PROXYLIB_AUTOPROXY` (`1`, or client names separated by `:`) makes those clients use
@@ -602,7 +604,8 @@ Several of these change observable behavior for anyone relying on the old
 - The `pac.load()` warning referenced installing `proxylib[pac]`; the real
   extra name is `proxylib[jspac]`.
 
-[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/jose-pr/proxylib/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/jose-pr/proxylib/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/jose-pr/proxylib/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/jose-pr/proxylib/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/jose-pr/proxylib/compare/v1.0.1...v1.0.2
